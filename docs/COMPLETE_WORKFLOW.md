@@ -10,8 +10,6 @@ This guide explains the full MD→FEM workflow using all four core scripts in th
 2. [The Four Core Scripts](#the-four-core-scripts)
 3. [Complete Workflow](#complete-workflow)
 4. [Script-by-Script Details](#script-by-script-details)
-5. [Practical Examples](#practical-examples)
-6. [Integration Patterns](#integration-patterns)
 
 ---
 
