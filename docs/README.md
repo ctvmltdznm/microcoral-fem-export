@@ -205,7 +205,7 @@ converter.convert()
 ## 📚 Documentation
 
 ### Quick Links
-- **[Complete Workflow](docs/COMPLETE_WORKFLOW.md)** - End-to-end examples
+- **[Complete Workflow](COMPLETE_WORKFLOW.md)** - End-to-end examples
 
 ### Key Modules
 
