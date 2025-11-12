@@ -226,9 +226,10 @@ def radial_needles_more_2d(num_centers, domain_size, needle_length_range,
 
 
 def export_to_abaqus_enhanced(volume, needle_volume, center_properties, domain_size, 
-                               filename, material_properties=None, spacing=None, origin=None):
+                               filename, material_properties=None, spacing=None, origin=None,
+                               boundary_conditions=None):
     """
-    Enhanced Abaqus INP export with flexible material definitions
+    Enhanced Abaqus INP export with flexible material definitions and boundary conditions
     
     Parameters:
     -----------
@@ -252,6 +253,19 @@ def export_to_abaqus_enhanced(volume, needle_volume, center_properties, domain_s
         Grid spacing
     origin : tuple, optional
         Grid origin
+    boundary_conditions : dict, optional
+        Dictionary defining boundary conditions and loading:
+        {
+            'type': 'tension_z' | 'compression_z' | 'shear_xy' | 'biaxial_xy' | 'custom',
+            'displacement': float (for displacement-controlled),
+            'force': float (for force-controlled),
+            'step_time': float (default 1.0),
+            'custom': {
+                'fixed': ['Bottom_Z', ...],  # Node sets to fix completely
+                'prescribed': [('Top_Z', 3, 1.0), ...]  # (set, DOF, value) tuples
+            }
+        }
+        If None, creates a minimal step with one fixed corner node
     """
     
     # Get mesh dimensions
@@ -515,19 +529,173 @@ def export_to_abaqus_enhanced(volume, needle_volume, center_properties, domain_s
                 f.write(f"*Solid Section, elset=Needle{needle_id}, material={mat_name}\n")
                 f.write(",\n")
         
-        # Simple step definition
+        # Write step with boundary conditions
         f.write("**\n")
         f.write("** ----------------------------------------------------------------\n")
         f.write("**                            STEP\n")
         f.write("** ----------------------------------------------------------------\n")
-        f.write("*Step, name=Step-1\n")
-        f.write("*Static\n")
-        f.write("1., 1., 1e-05, 1.\n")
-        f.write("**\n")
-        f.write("*Boundary\n")
-        f.write(f"{node_ids[0,0,0]}, 1, 3\n")  # Fix one corner
-        f.write("**\n")
-        f.write("*End Step\n")
+        
+        # Apply boundary conditions based on specification
+        if boundary_conditions is None:
+            # Default: minimal step with one fixed corner
+            f.write("*Step, name=Step-1\n")
+            f.write("*Static\n")
+            f.write("1., 1., 1e-05, 1.\n")
+            f.write("**\n")
+            f.write("** Default: Fix one corner to prevent rigid body motion\n")
+            f.write("*Boundary\n")
+            f.write(f"Bottom_Z, 1, 3\n")
+            f.write("**\n")
+            f.write("*End Step\n")
+        
+        else:
+            bc_type = boundary_conditions.get('type', 'custom')
+            step_time = boundary_conditions.get('step_time', 1.0)
+            
+            if bc_type == 'tension_z':
+                # Uniaxial tension along Z-axis
+                displacement = boundary_conditions.get('displacement', 1.0)
+                f.write("*Step, name=Tension_Z, nlgeom=NO\n")
+                f.write("*Static\n")
+                f.write(f"0.01, {step_time}, 1e-08, 0.1\n")
+                f.write("**\n")
+                f.write("** UNIAXIAL TENSION TEST (Z-AXIS)\n")
+                f.write("** Fix bottom surface completely\n")
+                f.write("*Boundary\n")
+                f.write("Bottom_Z, 1, 3\n")
+                f.write("**\n")
+                f.write("** Apply displacement to top surface\n")
+                f.write("*Boundary\n")
+                f.write(f"Top_Z, 3, 3, {displacement}\n")
+                f.write("**\n")
+                f.write("** OUTPUT REQUESTS\n")
+                f.write("*Output, field, variable=PRESELECT\n")
+                f.write("*Output, history, variable=PRESELECT\n")
+                f.write("**\n")
+                f.write("*End Step\n")
+            
+            elif bc_type == 'compression_z':
+                # Uniaxial compression along Z-axis
+                displacement = boundary_conditions.get('displacement', -0.5)
+                f.write("*Step, name=Compression_Z, nlgeom=NO\n")
+                f.write("*Static\n")
+                f.write(f"0.01, {step_time}, 1e-08, 0.1\n")
+                f.write("**\n")
+                f.write("** UNIAXIAL COMPRESSION TEST (Z-AXIS)\n")
+                f.write("** Fix bottom surface completely\n")
+                f.write("*Boundary\n")
+                f.write("Bottom_Z, 1, 3\n")
+                f.write("**\n")
+                f.write("** Apply negative displacement to top surface\n")
+                f.write("*Boundary\n")
+                f.write(f"Top_Z, 3, 3, {displacement}\n")
+                f.write("**\n")
+                f.write("** OUTPUT REQUESTS\n")
+                f.write("*Output, field, variable=PRESELECT\n")
+                f.write("*Output, history, variable=PRESELECT\n")
+                f.write("**\n")
+                f.write("*End Step\n")
+            
+            elif bc_type == 'shear_xy':
+                # Simple shear in XY plane
+                displacement = boundary_conditions.get('displacement', 0.5)
+                f.write("*Step, name=Shear_XY, nlgeom=NO\n")
+                f.write("*Static\n")
+                f.write(f"0.01, {step_time}, 1e-08, 0.1\n")
+                f.write("**\n")
+                f.write("** SIMPLE SHEAR TEST (XY PLANE)\n")
+                f.write("** Fix bottom surface completely\n")
+                f.write("*Boundary\n")
+                f.write("Bottom_Z, 1, 3\n")
+                f.write("**\n")
+                f.write("** Apply shear displacement to top surface\n")
+                f.write("*Boundary\n")
+                f.write(f"Top_Z, 1, 1, {displacement}\n")
+                f.write("Top_Z, 3, 3, 0.0\n")
+                f.write("**\n")
+                f.write("** OUTPUT REQUESTS\n")
+                f.write("*Output, field, variable=PRESELECT\n")
+                f.write("*Output, history, variable=PRESELECT\n")
+                f.write("**\n")
+                f.write("*End Step\n")
+            
+            elif bc_type == 'biaxial_xy':
+                # Biaxial tension in XY plane
+                displacement = boundary_conditions.get('displacement', 0.5)
+                f.write("*Step, name=Biaxial_XY, nlgeom=NO\n")
+                f.write("*Static\n")
+                f.write(f"0.01, {step_time}, 1e-08, 0.1\n")
+                f.write("**\n")
+                f.write("** BIAXIAL TENSION TEST (XY PLANE)\n")
+                f.write("** Fix bottom corners to prevent rigid body motion\n")
+                f.write("*Boundary\n")
+                f.write("Bottom_X, 1, 1, 0.0\n")
+                f.write("Bottom_Y, 2, 2, 0.0\n")
+                f.write("Bottom_Z, 3, 3, 0.0\n")
+                f.write("**\n")
+                f.write("** Apply biaxial displacement\n")
+                f.write("*Boundary\n")
+                f.write(f"Top_X, 1, 1, {displacement}\n")
+                f.write(f"Top_Y, 2, 2, {displacement}\n")
+                f.write("**\n")
+                f.write("** OUTPUT REQUESTS\n")
+                f.write("*Output, field, variable=PRESELECT\n")
+                f.write("*Output, history, variable=PRESELECT\n")
+                f.write("**\n")
+                f.write("*End Step\n")
+            
+            elif bc_type == 'custom':
+                # Custom boundary conditions
+                f.write("*Step, name=CustomLoad, nlgeom=NO\n")
+                f.write("*Static\n")
+                f.write(f"0.01, {step_time}, 1e-08, 0.1\n")
+                f.write("**\n")
+                f.write("** CUSTOM BOUNDARY CONDITIONS\n")
+                
+                custom_bc = boundary_conditions.get('custom', {})
+                
+                # Apply fixed boundary conditions
+                fixed_sets = custom_bc.get('fixed', [])
+                if fixed_sets:
+                    f.write("** Fixed node sets\n")
+                    f.write("*Boundary\n")
+                    for node_set in fixed_sets:
+                        f.write(f"{node_set}, 1, 3\n")
+                    f.write("**\n")
+                
+                # Apply prescribed displacements
+                prescribed = custom_bc.get('prescribed', [])
+                if prescribed:
+                    f.write("** Prescribed displacements\n")
+                    f.write("*Boundary\n")
+                    for node_set, dof, value in prescribed:
+                        f.write(f"{node_set}, {dof}, {dof}, {value}\n")
+                    f.write("**\n")
+                
+                # Apply concentrated forces
+                forces = custom_bc.get('forces', [])
+                if forces:
+                    f.write("** Concentrated forces\n")
+                    f.write("*Cload\n")
+                    for node_set, dof, value in forces:
+                        f.write(f"{node_set}, {dof}, {value}\n")
+                    f.write("**\n")
+                
+                # Apply distributed loads (pressure)
+                pressures = custom_bc.get('pressures', [])
+                if pressures:
+                    f.write("** Distributed pressure loads\n")
+                    for elem_set, value in pressures:
+                        f.write(f"*Dsload\n")
+                        f.write(f"{elem_set}, P, {value}\n")
+                    f.write("**\n")
+                
+                f.write("** OUTPUT REQUESTS\n")
+                f.write("*Output, field, variable=PRESELECT\n")
+                f.write("*Output, history, variable=PRESELECT\n")
+                f.write("**\n")
+                f.write("*End Step\n")
+
     
     print(f"Abaqus INP file written: {filename}")
     print(f"  Total elements: {elem_id-1}")
@@ -535,7 +703,26 @@ def export_to_abaqus_enhanced(volume, needle_volume, center_properties, domain_s
     print(f"  Grains: {len(grain_ids)}")
     print(f"  Needles: {len(needle_ids)}")
     print(f"  Boundary node sets: Bottom_Z, Top_Z, Bottom_X, Top_X, Bottom_Y, Top_Y")
-    print(f"  ✓ Ready for boundary conditions (e.g., fix Bottom_Z, pull Top_Z)")
+    
+    if boundary_conditions is not None:
+        bc_type = boundary_conditions.get('type', 'custom')
+        if bc_type == 'tension_z':
+            disp = boundary_conditions.get('displacement', 1.0)
+            print(f"  ✓ Applied BCs: Tension test (Bottom_Z fixed, Top_Z displacement={disp})")
+        elif bc_type == 'compression_z':
+            disp = boundary_conditions.get('displacement', -0.5)
+            print(f"  ✓ Applied BCs: Compression test (Bottom_Z fixed, Top_Z displacement={disp})")
+        elif bc_type == 'shear_xy':
+            disp = boundary_conditions.get('displacement', 0.5)
+            print(f"  ✓ Applied BCs: Shear test (Bottom_Z fixed, Top_Z shear={disp})")
+        elif bc_type == 'biaxial_xy':
+            disp = boundary_conditions.get('displacement', 0.5)
+            print(f"  ✓ Applied BCs: Biaxial tension (displacement={disp})")
+        elif bc_type == 'custom':
+            print(f"  ✓ Applied BCs: Custom boundary conditions")
+        print(f"  ✓ Ready to run in Abaqus!")
+    else:
+        print(f"  ✓ Minimal step (add boundary conditions manually)")
 
 def export_to_exodus(volume, needle_volume, domain_size, filename, 
                     center_properties=None, spacing=None, origin=None):
@@ -843,7 +1030,7 @@ def export_vtk_unstructured(volume, needle_volume, domain_size, filename,
                             f.write(f"{np.rad2deg(angle):.6f}\n")
                         else:
                             f.write("0.0\n")
-    
+        
         # Write point data for boundary identification
         f.write(f"\nPOINT_DATA {num_points}\n")
         
