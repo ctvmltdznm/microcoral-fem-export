@@ -1,0 +1,18 @@
+# Engineering Constants for Orthotropic Material
+# Generated from elastic tensor conversion
+
+E1 = 140.431988 GPa
+E2 = 70.296501 GPa
+E3 = 63.412784 GPa
+
+nu12 = 0.504843
+nu13 = 0.077469
+nu23 = 0.466367
+
+G12 = 46.600000 GPa
+G13 = 31.100000 GPa
+G23 = 42.100000 GPa
+
+# For Abaqus (in MPa):
+# *Elastic, type=ORTHOTROPIC
+# 1.404320e+05, 7.029650e+04, 6.341278e+04, 0.504843, 0.077469, 0.466367, 4.660000e+04, 3.110000e+04, 4.210000e+04

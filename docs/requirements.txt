@@ -1,0 +1,10 @@
+# requirements.txt
+# Core dependencies
+numpy>=1.20.0
+scipy>=1.7.0
+matplotlib>=3.4.0
+pyvista>=0.32.0
+
+# Optional dependencies
+meshio>=5.0.0          # For Exodus II export
+argparse>=1.4.0        # For command-line scripts (usually built-in)
