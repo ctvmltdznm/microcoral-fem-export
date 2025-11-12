@@ -20,7 +20,7 @@ This guide explains the full MD→FEM workflow using all four core scripts in th
 ### The Complete Pipeline
 
 ```
-MD/DFT Simulations
+MD/DFT Simulations and/or Experiments
        ↓
 [elastic_tensor_converter.py]  ← Convert 6×6 matrix to E, ν, G
        ↓
@@ -39,7 +39,7 @@ Run simulations in Abaqus/MOOSE
 
 ### Why Four Scripts?
 
-1. **`elastic_tensor_converter.py`** - Bridges MD/DFT and FEM
+1. **`elastic_tensor_converter.py`** - Stiffness to engineering constants
 2. **`enhanced_microstructure_export.py`** - Core microstructure generation
 3. **`microstructure_utils.py`** - Advanced operations (texture, GBs)
 4. **`convert2e.py`** - Format flexibility (VTK→Exodus)
@@ -54,7 +54,7 @@ Each script is modular and can be used independently or as part of the complete 
 
 **Purpose:** Convert elastic tensors from atomistic simulations to FEM-ready engineering constants.
 
-**Input:** 6×6 stiffness matrix C (GPa) from MD/DFT  
+**Input:** 6×6 stiffness matrix C (GPa)
 **Output:** E₁, E₂, E₃, ν₁₂, ν₁₃, ν₂₃, G₁₂, G₁₃, G₂₃
 
 **Key Functions:**
@@ -195,7 +195,7 @@ print(f"Generated {len(center_properties)} grains")
 print(f"Total needles: {sum(len(c['needles']) for c in center_properties)}")
 ```
 
-**Step 4: Export with Properties and BCs**
+**Step 4: Export with Properties and BCs (requires additional testing!)**
 ```python
 from src.enhanced_microstructure_export import export_to_abaqus_enhanced
 
@@ -430,7 +430,7 @@ print(f"High-angle GBs: {len(high_angle_gbs)}")
 print(f"Special GBs (Σ3): {len(special_gbs)}")
 ```
 
-**Step 3: Create Cohesive Zones**
+**Step 3: Create Cohesive Zones (not tested!)**
 ```python
 from src.microstructure_utils import create_abaqus_cohesive_section
 
@@ -455,7 +455,7 @@ create_abaqus_cohesive_section(
 ### Detailed: `elastic_tensor_converter.py`
 
 #### Purpose
-Bridges the gap between atomistic simulations (MD/DFT) and continuum FEM by converting between different representations of elastic properties.
+Bridges the gap between atomistic simulations (MD/DFT) and continuum FEM by converting between different representations of elastic properties + mechanical responses.
 
 #### Mathematical Background
 
@@ -497,7 +497,7 @@ Must satisfy orthotropic symmetry:
 ```
 
 #### Examples Included
-1. **Aragonite (orthorhombic)** - From DFT calculations
+1. **Aragonite (orthorhombic)** - Experimental+simulation C
 2. **BCC Iron (cubic)** - With isotropic approximation
 3. **Custom input** - Template for your data
 
@@ -708,13 +708,13 @@ success = converter.convert()
 
 **Four scripts, complete workflow:**
 
-1. **elastic_tensor_converter.py** - MD/DFT → engineering constants
+1. **elastic_tensor_converter.py** - Stiffness to engineering constants
 2. **enhanced_microstructure_export.py** - Generate → export with BCs
 3. **microstructure_utils.py** - Advanced operations (texture, GBs)
 4. **convert2e.py** - Format conversion → MOOSE/ParaView
 
 **Typical usage:**
-1. Run MD → get C matrix
+1. Run MD / experiment → get C matrix
 2. Convert C → engineering constants
 3. Generate microstructure
 4. Export with properties and BCs
