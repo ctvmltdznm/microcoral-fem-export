@@ -6,18 +6,18 @@
 [![License](https://img.shields.io/badge/license-MIT-green.svg)](LICENSE)
 
 A comprehensive Python toolkit for computational materials science, providing:
-- 🏗️ Synthetic microstructure generation (quasi-2D and 3D)
-- 🔄 Elastic tensor to engineering constants conversion
-- 📤 Multi-format export (Abaqus, Exodus, VTK)
-- ⚙️ Automatic material orientation assignment
-- 🎯 Ready-to-run boundary conditions
-- 🔗 Complete MD-to-FEM workflow
+- Synthetic microstructure generation (quasi-2D and 3D)
+- Elastic tensor to engineering constants conversion
+- Multi-format export (Abaqus, Exodus, VTK)
+- Automatic material orientation assignment
+- Ready-to-run boundary conditions
+- Complete MD-to-FEM workflow
 
 Developed for biomineralized structures (aragonite coral) and polycrystalline metals (BCC iron/steel).
 
 ---
 
-## ⭐ Features
+## Features
 
 ### Microstructure Generation
 - Radial needle structures (quasi-2D or full 3D)
@@ -46,43 +46,26 @@ Developed for biomineralized structures (aragonite coral) and polycrystalline me
 
 ---
 
-## 📦 Repository Structure
+## Repository Structure
 
 ```
 microstructure-fem-export/
 ├── README.md                           # This file
-├── LICENSE                             # MIT License
+├── LICENSE                             
 ├── requirements.txt                    # Dependencies
 │
 ├── src/                                # Source code
 │   ├── enhanced_microstructure_export.py   # Main export (with BC)
 │   ├── microstructure_utils.py             # Utility functions
-│   ├── elastic_tensor_converter.py         # Tensor→constants converter
-│   ├── convert2e.py                        # VTK→Exodus converter
-│   └── __init__.py                         # Package init
+│   ├── elastic_tensor_converter.py         # Tensor 2 constants converter
+│   └── convert2e.py                        # VTK 2 Exodus converter
 │
 ├── examples/                           # Example scripts
-│   ├── 01_minimal_example.py               # Quick start
-│   ├── 02_boundary_conditions.py           # All BC types
-│   ├── 03_aragonite_coral.py               # Realistic coral
-│   ├── 04_bcc_polycrystal.py               # Polycrystalline iron
-│   ├── 05_material_properties.py           # Elastic tensor usage
-│   └── 06_complete_workflow.py             # Full MD→FEM pipeline
-│
-├── docs/                               # Documentation
-│   ├── 01_GETTING_STARTED.md               # Installation and basics
-│   ├── 02_MICROSTRUCTURE_GENERATION.md     # Microstructure guide
-│   ├── 03_MATERIAL_PROPERTIES.md           # Material definition
-│   ├── 04_BOUNDARY_CONDITIONS.md           # BC application
-│   ├── 05_EXPORT_FORMATS.md                # Format-specific guides
-│   ├── 06_COMPLETE_WORKFLOW.md             # End-to-end examples
-│   ├── 07_API_REFERENCE.md                 # Complete API
-│   └── 08_TROUBLESHOOTING.md               # Common issues
-│
-├── tests/                              # Tests (optional)
-│   └── test_export.py
-│
-└── output/                             # Output directory (gitignored)
+│   └── practical_examples.py               # Quick start, examples on coral, optional bcc iron
+│   
+└── docs/                               # Documentation
+    └── COMPLETE_WORKFLOW.md               # Details + workflow
+ 
 ```
 
 ---
@@ -128,7 +111,7 @@ export_to_abaqus_enhanced(
 
 ## 🔬 Complete Workflow
 
-### Step 1: Convert MD/DFT Elastic Properties
+### Step 1: Convert Elastic Properties
 
 ```python
 from src.elastic_tensor_converter import (
@@ -138,7 +121,7 @@ from src.elastic_tensor_converter import (
     format_for_abaqus
 )
 
-# Your 6×6 stiffness matrix from MD/DFT (GPa)
+# Your 6×6 stiffness matrix in GPa
 C_matrix = np.array([
     [171.8,  57.5,  30.2,   0.0,   0.0,   0.0],
     [ 57.5, 106.7,  46.9,   0.0,   0.0,   0.0],
@@ -153,10 +136,11 @@ S = stiffness_to_compliance(C_matrix)
 constants = compliance_to_engineering_constants(S)
 valid, errors = validate_orthotropic_symmetry(constants)
 
-# Get Abaqus-ready format
+# Get Abaqus-ready format (check whether syntax formatting is correct)
 abaqus_line = format_for_abaqus(constants, unit='MPa')
 print(abaqus_line)
-# Output: E1, E2, E3, nu12, nu13, nu23, G12, G13, G23
+# Output: E1, E2, E3, nu12, nu13, nu23, G12, G13
+ G23
 ```
 
 ### Step 2: Generate Microstructure
@@ -211,7 +195,7 @@ export_vtk_unstructured(
     center_properties=center_properties
 )
 
-# Convert VTK to Exodus for MOOSE
+# Convert VTK to Exodus for MOOSE (from cmd: python convert2e.py your_setup.vtk  --organize-by needle_id (or grain_id // or authomatically)
 converter = MeshConverter('model.vtk', 'model.e', organize_by='grain_id')
 converter.convert()
 ```
@@ -221,11 +205,7 @@ converter.convert()
 ## 📚 Documentation
 
 ### Quick Links
-- **[Getting Started](docs/01_GETTING_STARTED.md)** - Installation and first steps
-- **[Material Properties](docs/03_MATERIAL_PROPERTIES.md)** - Using elastic tensor converter
-- **[Boundary Conditions](docs/04_BOUNDARY_CONDITIONS.md)** - Automatic BC application
-- **[Complete Workflow](docs/06_COMPLETE_WORKFLOW.md)** - End-to-end examples
-- **[API Reference](docs/07_API_REFERENCE.md)** - Complete function documentation
+- **[Complete Workflow](docs/COMPLETE_WORKFLOW.md)** - End-to-end examples
 
 ### Key Modules
 
@@ -239,11 +219,11 @@ Main module for microstructure generation and export.
 - `export_to_exodus()` - Direct Exodus II export
 
 #### 2. `elastic_tensor_converter.py`
-Convert elastic tensors from MD/DFT to FEM-ready constants.
+Convert elastic tensors to FEM-ready constants.
 
 **Key Functions:**
-- `stiffness_to_compliance()` - C → S matrix
-- `compliance_to_engineering_constants()` - Extract E, ν, G
+- `stiffness_to_compliance()` - C to S matrix
+- `compliance_to_engineering_constants()` - Extract E, nu, G
 - `validate_orthotropic_symmetry()` - Check validity
 - `format_for_abaqus()` - Ready-to-paste format
 
@@ -366,153 +346,3 @@ pip install -r requirements.txt
 
 ---
 
-## 📖 Examples
-
-### Example 1: Minimal (30 seconds)
-
-```bash
-cd examples
-python 01_minimal_example.py
-```
-
-Generates:
-- `minimal_model.inp` - Abaqus file with node sets
-- Creates ~8,000 elements
-- Node sets available for manual BC setup
-
-### Example 2: All Boundary Conditions
-
-```bash
-python 02_boundary_conditions.py
-```
-
-Generates 5 models with different BCs:
-- Tension, compression, shear, biaxial, custom
-
-### Example 3: Realistic Aragonite Coral
-
-```bash
-python 03_aragonite_coral.py
-```
-
-Generates:
-- Complete model with MD properties
-- 1% tensile strain applied
-- Ready to submit to Abaqus
-- VTK for visualization
-
-### Example 4: Material Property Workflow
-
-```bash
-python 05_material_properties.py
-```
-
-Shows complete workflow:
-- Define stiffness matrix
-- Convert to engineering constants
-- Validate symmetry
-- Generate microstructure
-- Export with properties
-
----
-
-## 📈 Performance
-
-| Resolution | Elements | Export Time | File Size | Use Case |
-|------------|----------|-------------|-----------|----------|
-| 20³ | ~8k | <1s | ~1 MB | Quick testing |
-| 50³ | ~125k | ~5s | ~15 MB | Development |
-| 100³ | ~1M | ~30s | ~120 MB | Production |
-| 200³ | ~8M | ~5min | ~1 GB | High resolution |
-
-Tested on: Intel i7, 16GB RAM
-
----
-
-## 🤝 Contributing
-
-Contributions welcome! Please:
-
-1. Fork the repository
-2. Create a feature branch
-3. Add tests for new functionality
-4. Update documentation
-5. Submit a pull request
-
-See [CONTRIBUTING.md](CONTRIBUTING.md) for detailed guidelines.
-
----
-
-## 📝 License
-
-This project is licensed under the MIT License - see [LICENSE](LICENSE) file.
-
----
-
-## 👥 Authors
-
-**Nikolai K.**  
-Postdoctoral Researcher  
-Clausthal University of Technology  
-Computational Materials Physics Group
-
----
-
-## 🙏 Acknowledgments
-
-- Computational Materials Physics group, TU Clausthal
-- DFG (German Research Foundation)
-- Universitat Politècnica de Catalunya
-- Marta Pena Fernandez (original microCT-to-microFE framework)
-
----
-
-## 📧 Contact
-
-- **GitHub Issues**: [Create an issue](https://github.com/yourusername/microstructure-fem-export/issues)
-- **Email**: nikolai.k@tu-clausthal.de
-- **Research Gate**: [Your profile]
-
----
-
-## 📚 Citation
-
-If you use this toolkit in your research, please cite:
-
-```bibtex
-@software{microstructure_fem_export_2024,
-  author = {Nikolai K.},
-  title = {Microstructure FEM Export Toolkit},
-  year = {2024},
-  publisher = {GitHub},
-  institution = {Clausthal University of Technology},
-  url = {https://github.com/yourusername/microstructure-fem-export}
-}
-```
-
----
-
-## 🔗 Related Projects
-
-- [MOOSE Framework](https://mooseframework.inl.gov/)
-- [MTEX](https://mtex-toolbox.github.io/) - EBSD analysis
-- [Dream.3D](http://dream3d.bluequartz.net/) - Microstructure generation
-
----
-
-## 🗺️ Roadmap
-
-- [ ] GUI for interactive microstructure generation
-- [ ] Integration with Dream.3D
-- [ ] Automatic periodic boundary conditions
-- [ ] Support for more crystal systems (FCC, HCP)
-- [ ] Machine learning for property prediction
-- [ ] Automated mesh refinement at grain boundaries
-
----
-
-**⭐ If you find this useful, please star the repository!**
-
-**🐛 Found a bug? [Report it](https://github.com/yourusername/microstructure-fem-export/issues)**
-
-**💡 Have a suggestion? [Let us know](https://github.com/yourusername/microstructure-fem-export/discussions)**
