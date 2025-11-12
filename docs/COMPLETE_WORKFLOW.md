@@ -373,7 +373,7 @@ if success:
 
 ---
 
-### Workflow 3: Grain Boundary Cohesive Zones
+### Workflow 3: Grain Boundary Cohesive Zones (to be done)
 
 **Step 1: Generate and Orient**
 ```python
@@ -441,51 +441,11 @@ create_abaqus_cohesive_section(
     grain_orientations
 )
 
-# This creates:
+# This will create:
 # - Cohesive element definitions
 # - Material properties based on misorientation
 # - Low-angle GBs: stronger
 # - High-angle GBs: weaker
-```
-
-**Step 4: Export Base Model**
-```python
-from src.enhanced_microstructure_export import export_to_abaqus_enhanced
-
-material_props = {
-    'needle_material': {
-        'name': 'GrainInterior',
-        'type': 'isotropic',
-        'E': 200e3,
-        'nu': 0.3
-    }
-}
-
-export_to_abaqus_enhanced(
-    volume, needle_volume, center_properties, 100,
-    'base_model.inp',
-    material_properties=material_props,
-    boundary_conditions={'type': 'tension_z', 'displacement': 1.0}
-)
-```
-
-**Step 5: Merge Files**
-```python
-# Combine base model and cohesive zones
-with open('base_model.inp', 'r') as f:
-    base_lines = f.readlines()
-
-with open('gb_cohesive_zones.inp', 'r') as f:
-    cz_lines = f.readlines()
-
-# Insert cohesive zones before the step definition
-step_idx = next(i for i, line in enumerate(base_lines) if '*Step' in line)
-combined = base_lines[:step_idx] + cz_lines + base_lines[step_idx:]
-
-with open('complete_model_with_czm.inp', 'w') as f:
-    f.writelines(combined)
-
-print("✓ Complete model with cohesive zones created")
 ```
 
 ---
@@ -682,21 +642,6 @@ For each internal face:
 - High-angle: θ ≥ 15°
 - Special: Near CSL values (Σ3=60°, Σ5=36.9°, etc.)
 
-#### Cohesive Zone Properties
-
-Based on misorientation:
-```python
-if θ < 15°:  # Low-angle
-    stiffness = 1e6
-    strength = 1000
-    toughness = 100
-else:  # High-angle
-    stiffness = 5e5
-    strength = 500
-    toughness = 50
-```
-
-Modify these values based on your MD simulations or experiments.
 
 ---
 
@@ -759,203 +704,6 @@ success = converter.convert()
 
 ---
 
-## Practical Examples
-
-### Example 1: Quick Test (1 minute)
-
-```bash
-cd examples
-python 01_minimal_example.py
-paraview minimal_model.vtk
-```
-
-### Example 2: Realistic Coral (5 minutes)
-
-```bash
-python 03_aragonite_coral.py
-# Generates complete model ready for Abaqus
-abaqus job=aragonite_coral_tension
-```
-
-### Example 3: Full Workflow (10 minutes)
-
-```bash
-python 06_complete_workflow.py
-# Runs entire MD→FEM pipeline:
-# 1. Convert elastic tensor
-# 2. Generate microstructure
-# 3. Export with properties
-# 4. Convert to multiple formats
-# 5. Create visualization
-```
-
----
-
-## Integration Patterns
-
-### Pattern 1: Batch Processing
-
-```python
-# Generate multiple microstructures with different parameters
-for num_grains in [10, 20, 50, 100]:
-    for resolution in [50, 75, 100]:
-        volume, needle_volume, props, _ = radial_needles_more_2d(
-            num_centers=num_grains,
-            domain_size=200,
-            resolution=resolution,
-            ...
-        )
-        
-        export_to_abaqus_enhanced(
-            volume, needle_volume, props, 200,
-            f'model_g{num_grains}_r{resolution}.inp',
-            ...
-        )
-```
-
-### Pattern 2: Parameter Studies
-
-```python
-# Same microstructure, different loading
-volume, needle_volume, props, _ = radial_needles_more_2d(...)
-
-for strain in [0.005, 0.01, 0.015, 0.02]:
-    disp = 200 * strain
-    
-    export_to_abaqus_enhanced(
-        volume, needle_volume, props, 200,
-        f'tension_strain_{strain:.3f}.inp',
-        material_properties=material_props,
-        boundary_conditions={'type': 'tension_z', 'displacement': disp}
-    )
-```
-
-### Pattern 3: Multi-Scale
-
-```python
-# Coarse model for testing
-volume_coarse, _, props_coarse, _ = radial_needles_more_2d(
-    num_centers=10, resolution=30, ...
-)
-
-# Fine model for production
-volume_fine, _, props_fine, _ = radial_needles_more_2d(
-    num_centers=45, resolution=100, ...
-)
-
-# Same material properties for both
-material_props = {...}
-```
-
----
-
-## Best Practices
-
-### 1. Always Validate
-
-```python
-# After converting elastic tensor
-valid, errors = validate_orthotropic_symmetry(constants)
-if not valid:
-    print("⚠️ Symmetry validation failed!")
-    print("Check your stiffness matrix")
-```
-
-### 2. Start Small
-
-```python
-# Test with low resolution first
-volume_test, _, _, _ = radial_needles_more_2d(
-    num_centers=5,
-    resolution=20,  # Small!
-    ...
-)
-
-# If it works, scale up
-volume_prod, _, _, _ = radial_needles_more_2d(
-    num_centers=45,
-    resolution=100,  # Production
-    ...
-)
-```
-
-### 3. Visualize Before Running
-
-```python
-# Always export VTK for checking
-export_vtk_unstructured(volume, needle_volume, domain_size, 'check.vtk', ...)
-
-# Open in ParaView:
-# - Check grain sizes
-# - Check orientations
-# - Verify boundary nodes
-```
-
-### 4. Document Parameters
-
-```python
-# Save parameters with output
-params = {
-    'num_centers': 45,
-    'domain_size': 200,
-    'resolution': 100,
-    'quasi_2d': True,
-    'material': 'Aragonite',
-    'strain': 0.01
-}
-
-import json
-with open('model_parameters.json', 'w') as f:
-    json.dump(params, f, indent=2)
-```
-
----
-
-## Troubleshooting
-
-### Issue: Symmetry validation fails
-
-**Cause:** Stiffness matrix not symmetric or incorrect values  
-**Solution:**
-```python
-# Check matrix symmetry
-print(np.allclose(C, C.T))
-
-# Check determinant
-print(np.linalg.det(C))  # Should be > 0
-
-# Check individual terms
-print(f"C12 = {C[0,1]}, C21 = {C[1,0]}")  # Should be equal
-```
-
-### Issue: Large file sizes
-
-**Cause:** High resolution with text format  
-**Solution:**
-```python
-# Use binary Exodus instead
-export_to_exodus(volume, needle_volume, domain_size, 'model.e')
-
-# Or reduce resolution
-resolution = 50  # Instead of 100
-```
-
-### Issue: ParaView doesn't show grain colors
-
-**Cause:** Elements not organized by grain_id  
-**Solution:**
-```python
-# Use convert2e.py to reorganize
-from src.convert2e import MeshConverter
-
-converter = MeshConverter('model.vtk', organize_by='grain_id')
-converter.convert()
-
-# Now model.e will have proper blocks
-```
-
----
-
 ## Summary
 
 **Four scripts, complete workflow:**
@@ -976,5 +724,3 @@ converter.convert()
 **All modular:** Use any script independently or in combination.
 
 ---
-
-**Next:** See individual example scripts in `examples/` directory for working code.
