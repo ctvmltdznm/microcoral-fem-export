@@ -47,7 +47,6 @@ def generate_nucleation_centers(num_centers, bounds, min_distance=None, z_constr
     
     return np.array(centers)
 
-
 def radial_needles_more_2d(num_centers, domain_size, needle_length_range, 
                            needles_per_center_range, resolution=100,
                            z_constraint_factor=0.2, quasi_2d=True):
@@ -223,7 +222,6 @@ def radial_needles_more_2d(num_centers, domain_size, needle_length_range,
     mesh['needle_id'] = needle_volume.flatten(order='F')
     
     return volume, needle_volume, center_properties, mesh
-
 
 def export_to_abaqus_enhanced(volume, needle_volume, center_properties, domain_size, 
                                filename, material_properties=None, spacing=None, origin=None,
@@ -727,49 +725,33 @@ def export_to_abaqus_enhanced(volume, needle_volume, center_properties, domain_s
 def export_to_exodus(volume, needle_volume, domain_size, filename, 
                     center_properties=None, spacing=None, origin=None):
     """
-    Export to Exodus II format for MOOSE/FEBio compatibility WITH ORIENTATION DATA
-    Requires meshio package
+    Export to Exodus II format with Euler angles
     
-    Parameters:
-    -----------
-    volume : numpy.ndarray
-        3D array containing grain IDs
-    needle_volume : numpy.ndarray
-        3D array containing needle IDs
-    domain_size : float
-        Physical size of the domain
-    filename : str
-        Output filename (should end with .e or .exo)
-    center_properties : list, optional
-        List of center properties containing needle directions (enables orientation export)
-    spacing : tuple, optional
-        Grid spacing
-    origin : tuple, optional
-        Grid origin
+    CHANGED: Direct Euler angle calculation from needle direction (c-axis)
     """
     try:
         import meshio
+        import netCDF4 as nc
     except ImportError:
-        print("meshio package required for Exodus export. Install with: pip install meshio")
+        print("meshio and netCDF4 required for Exodus export")
+        print("Install with: pip install meshio netCDF4 --break-system-packages")
         return
     
-    # Get mesh dimensions
     ni, nj, nk = volume.shape
     
-    # Set default spacing and origin if not provided
     if spacing is None:
         spacing = (domain_size/ni, domain_size/nj, domain_size/nk)
     if origin is None:
         origin = (0, 0, 0)
     
-    # Create lookup for needle properties if available
+    # Build lookup for needle directions (these ARE the c-axes!)
     needle_directions = {}
     if center_properties is not None:
         for center in center_properties:
             for needle in center['needles']:
                 needle_directions[needle['id']] = needle['direction']
     
-    # Create points (nodes)
+    # Create points
     points = []
     for k in range(nk+1):
         for j in range(nj+1):
@@ -780,22 +762,19 @@ def export_to_exodus(volume, needle_volume, domain_size, filename,
                 points.append([x, y, z])
     points = np.array(points)
     
-    # Create connectivity for hexahedral elements
     def node_index(i, j, k):
         return i + j*(ni+1) + k*(ni+1)*(nj+1)
     
     cells = []
     grain_ids_list = []
     needle_ids_list = []
-    c_axis_x_list = []
-    c_axis_y_list = []
-    c_axis_z_list = []
+    euler_phi1_list = []
     euler_Phi_list = []
+    euler_phi2_list = []
     
     for k in range(nk):
         for j in range(nj):
             for i in range(ni):
-                # Get the 8 corner nodes (VTK/Exodus ordering)
                 elem_nodes = [
                     node_index(i, j, k),
                     node_index(i+1, j, k),
@@ -812,75 +791,136 @@ def export_to_exodus(volume, needle_volume, domain_size, filename,
                 needle_id = needle_volume[i, j, k] if needle_volume is not None else volume[i, j, k]
                 needle_ids_list.append(needle_id)
                 
-                # Add orientation data if available
+                # Direct Euler angle calculation from c-axis (needle direction)
                 if needle_id in needle_directions:
-                    direction = needle_directions[needle_id]
-                    c_axis_x_list.append(direction[0])
-                    c_axis_y_list.append(direction[1])
-                    c_axis_z_list.append(direction[2])
-                    # Euler Phi (angle from Z)
-                    Phi = np.arccos(np.clip(direction[2], -1, 1))
-                    euler_Phi_list.append(np.rad2deg(Phi))
+                    c_axis = needle_directions[needle_id]
+                    c = c_axis / np.linalg.norm(c_axis)
+                    
+                    # Spherical coordinates of c-axis
+                    phi1 = np.arctan2(c[1], c[0])
+                    Phi = np.arccos(np.clip(c[2], -1, 1))
+                    
+                    # Random phi2 per needle (twist around c-axis)
+                    np.random.seed(needle_id)
+                    phi2 = np.random.uniform(0, 2*np.pi)
+                    
+                    phi1 = np.degrees(phi1) % 360
+                    Phi = np.degrees(Phi)
+                    phi2 = np.degrees(phi2)
+                    
+                    euler_phi1_list.append(phi1)
+                    euler_Phi_list.append(Phi)
+                    euler_phi2_list.append(phi2)
                 else:
-                    c_axis_x_list.append(0.0)
-                    c_axis_y_list.append(0.0)
-                    c_axis_z_list.append(0.0)
+                    euler_phi1_list.append(0.0)
                     euler_Phi_list.append(0.0)
+                    euler_phi2_list.append(0.0)
     
-    cells = [("hexahedron", np.array(cells))]
-    
-    # Create cell data with orientation info
-    cell_data = {
-        "grain_id": [np.array(grain_ids_list)],
-        "needle_id": [np.array(needle_ids_list)]
-    }
-    
-    # Add orientation data if available
-    if needle_directions:
-        cell_data["c_axis_x"] = [np.array(c_axis_x_list)]
-        cell_data["c_axis_y"] = [np.array(c_axis_y_list)]
-        cell_data["c_axis_z"] = [np.array(c_axis_z_list)]
-        cell_data["euler_Phi"] = [np.array(euler_Phi_list)]
-    
-    # Create mesh object
+    # Create mesh
     mesh = meshio.Mesh(
         points=points,
-        cells=cells,
-        cell_data=cell_data
+        cells=[("hexahedron", np.array(cells))],
+        cell_data={}
     )
     
-    # Write to Exodus II format
-    mesh.write(filename, file_format="exodus")
+    meshio.write(filename, mesh, file_format="exodus")
+    
+    # Add element variables
+    exo = nc.Dataset(filename, 'r+')
+    
+    try:
+        num_vars = 5
+        exo.createDimension('num_elem_var', num_vars)
+        
+        name_var = exo.createVariable('name_elem_var', 'S1', ('num_elem_var', 'len_string'))
+        var_names = ['grain_id', 'needle_id', 'euler_phi1', 'euler_Phi', 'euler_phi2']
+        
+        for i, vname in enumerate(var_names):
+            name_str = vname.ljust(33, '\x00')
+            name_array = np.array([c.encode('utf-8') for c in name_str], dtype='S1')
+            name_var[i, :] = name_array
+        
+        var_data = [grain_ids_list, needle_ids_list, euler_phi1_list, euler_Phi_list, euler_phi2_list]
+        
+        for var_idx, data in enumerate(var_data):
+            var_name = f'vals_elem_var{var_idx+1}eb1'
+            var = exo.createVariable(var_name, 'f8', ('time_step', 'num_el_in_blk1'))
+            var[0, :] = np.array(data, dtype=np.float64)
+        
+    finally:
+        exo.close()
+    
+    phi1_arr = np.array(euler_phi1_list)
+    Phi_arr = np.array(euler_Phi_list)
+    phi2_arr = np.array(euler_phi2_list)
+    
+    phi1_nonzero = phi1_arr[phi1_arr > 0]
+    phi2_nonzero = phi2_arr[phi2_arr > 0]
     
     print(f"Exodus II file written: {filename}")
-    print(f"  Total elements: {len(cells[0][1])}")
-    print(f"  Total nodes: {len(points)}")
-    if needle_directions:
-        print(f"  ✓ Includes orientation data: c_axis_xyz, euler_Phi")
-        print(f"  ✓ c-axis aligned with needle direction (33 component)")
+    print(f"  Total elements: {len(cells)}")
+    print(f"  ✓ Euler angles from needle direction (c-axis):")
+    print(f"    - phi1: [{phi1_nonzero.min():.1f}, {phi1_nonzero.max():.1f}]°")
+    print(f"    - Phi:  [{Phi_arr.min():.1f}, {Phi_arr.max():.1f}]°")
+    print(f"    - phi2: [{phi2_nonzero.min():.1f}, {phi2_nonzero.max():.1f}]°")
+    
+    phi1_unique = len(np.unique(phi1_nonzero))
+    phi2_unique = len(np.unique(phi2_nonzero))
+    print(f"  ✓ Unique values: phi1={phi1_unique}, phi2={phi2_unique}")
+    
+    if phi1_unique > 1:
+        print(f"  ✓ SUCCESS: phi1 varies across grains!")
+    if phi2_unique > 10:
+        print(f"  ✓ SUCCESS: phi2 varies across needles!")
 
-def export_vtk_unstructured(volume, needle_volume, domain_size, filename, 
-                           center_properties=None, spacing=None, origin=None):
+def compute_local_coordinate_system(direction):
     """
-    Export to VTK unstructured grid format WITH ORIENTATION DATA
+    Compute complete orthonormal coordinate system from primary direction
+    Same logic as Abaqus orientation system
     
     Parameters:
     -----------
-    volume : numpy.ndarray
-        3D array containing grain IDs
-    needle_volume : numpy.ndarray
-        3D array containing needle IDs
-    domain_size : float
-        Physical size of the domain
-    filename : str
-        Output filename
-    center_properties : list, optional
-        List of center properties containing needle directions (enables orientation export)
-    spacing : tuple, optional
-        Grid spacing
-    origin : tuple, optional
-        Grid origin
+    direction : numpy.ndarray
+        Primary direction vector (c-axis for aragonite)
+    
+    Returns:
+    --------
+    a1, a2, a3 : numpy.ndarray
+        Three orthonormal vectors forming the local coordinate system
+        a1 = primary direction (c-axis, local z for aragonite)
+        a2 = secondary direction (perpendicular to a1)
+        a3 = tertiary direction (completes right-handed system)"""
+        
+    # Primary axis (a1) is the needle direction
+    a1 = direction / np.linalg.norm(direction)
+    
+    # Secondary axis perpendicular to a1
+    global_z = np.array([0, 0, 1])
+    if np.abs(np.dot(a1, global_z)) > 0.99:
+        global_x = np.array([1, 0, 0])
+        a2 = np.cross(a1, global_x)
+    else:
+        a2 = np.cross(a1, global_z)
+    
+    a2 = a2 / np.linalg.norm(a2)
+    
+    # Tertiary axis completes system
+    a3 = np.cross(a1, a2)
+    a3 = a3 / np.linalg.norm(a3)
+    
+    return a1, a2, a3
+
+def export_vtk_unstructured(volume, needle_volume, domain_size, filename, 
+                            center_properties=None, spacing=None, origin=None):
     """
+    Export to VTK Unstructured Grid format
+    
+    NOW INCLUDES ALL THREE EULER ANGLES:
+    - phi1 (azimuthal angle)
+    - euler_Phi (polar angle) - keeping old name for compatibility
+    - phi2 (twist angle) - NEW!
+    """
+    
     # Get mesh dimensions
     ni, nj, nk = volume.shape
     
@@ -890,184 +930,203 @@ def export_vtk_unstructured(volume, needle_volume, domain_size, filename,
     if origin is None:
         origin = (0, 0, 0)
     
-    # Create lookup for needle properties if available
-    needle_directions = {}
+    # Build lookup for needle directions and compute Euler angles
+    needle_properties = {}
     if center_properties is not None:
         for center in center_properties:
             for needle in center['needles']:
-                needle_directions[needle['id']] = needle['direction']
+                needle_id = needle['id']
+                c_axis = needle['direction']
+                
+                # Normalize
+                c = c_axis / np.linalg.norm(c_axis)
+                
+                # Compute ALL THREE Euler angles (same as Exodus)
+                phi1 = np.arctan2(c[1], c[0])
+                Phi = np.arccos(np.clip(c[2], -1, 1))
+                
+                # Random phi2 per needle (deterministic)
+                np.random.seed(needle_id)
+                phi2 = np.random.uniform(0, 2*np.pi)
+                
+                # Convert to degrees
+                phi1_deg = np.degrees(phi1) % 360
+                Phi_deg = np.degrees(Phi)
+                phi2_deg = np.degrees(phi2)
+                
+                needle_properties[needle_id] = {
+                    'c_axis': c,
+                    'phi1': phi1_deg,
+                    'Phi': Phi_deg,
+                    'phi2': phi2_deg
+                }
     
     with open(filename, 'w') as f:
-        # VTK header
+        # Write header
         f.write("# vtk DataFile Version 4.2\n")
-        f.write("Radial Needle Microstructure with Orientations\n")
+        f.write("Radial Needle Microstructure with Complete Euler Angles\n")
         f.write("ASCII\n")
         f.write("DATASET UNSTRUCTURED_GRID\n")
         
-        # Calculate the number of points and cells
-        num_points = (ni + 1) * (nj + 1) * (nk + 1)
-        num_cells = ni * nj * nk
+        # Write points (nodes)
+        num_points = (ni+1) * (nj+1) * (nk+1)
+        f.write(f"\nPOINTS {num_points} float\n")
         
-        # Write points
-        f.write(f"POINTS {num_points} float\n")
         for k in range(nk+1):
             for j in range(nj+1):
                 for i in range(ni+1):
-                    x = origin[0] + i * spacing[0]
-                    y = origin[1] + j * spacing[1]
-                    z = origin[2] + k * spacing[2]
+                    x = i * spacing[0] + origin[0]
+                    y = j * spacing[1] + origin[1]
+                    z = k * spacing[2] + origin[2]
                     f.write(f"{x} {y} {z}\n")
         
-        # Define a function to get the 1D index of a point
-        def point_index(i, j, k):
-            return i + j*(ni+1) + k*(ni+1)*(nj+1)
+        # Write cells (elements)
+        num_cells = ni * nj * nk
+        f.write(f"\nCELLS {num_cells} {num_cells * 9}\n")
         
-        # Write cells (hexahedra - type 12 in VTK)
-        f.write(f"\nCELLS {num_cells} {num_cells*9}\n")
         for k in range(nk):
             for j in range(nj):
                 for i in range(ni):
-                    # Get the 8 corner points for this hexahedron
-                    p0 = point_index(i, j, k)
-                    p1 = point_index(i+1, j, k)
-                    p2 = point_index(i+1, j+1, k)
-                    p3 = point_index(i, j+1, k)
-                    p4 = point_index(i, j, k+1)
-                    p5 = point_index(i+1, j, k+1)
-                    p6 = point_index(i+1, j+1, k+1)
-                    p7 = point_index(i, j+1, k+1)
-                    
-                    f.write(f"8 {p0} {p1} {p2} {p3} {p4} {p5} {p6} {p7}\n")
+                    # Node indices (VTK ordering)
+                    n0 = i + j*(ni+1) + k*(ni+1)*(nj+1)
+                    n1 = n0 + 1
+                    n2 = n0 + (ni+1) + 1
+                    n3 = n0 + (ni+1)
+                    n4 = n0 + (ni+1)*(nj+1)
+                    n5 = n4 + 1
+                    n6 = n4 + (ni+1) + 1
+                    n7 = n4 + (ni+1)
+                    f.write(f"8 {n0} {n1} {n2} {n3} {n4} {n5} {n6} {n7}\n")
         
-        # Write cell types (12 = hexahedron)
+        # Cell types (12 = hexahedron)
         f.write(f"\nCELL_TYPES {num_cells}\n")
         for _ in range(num_cells):
             f.write("12\n")
         
-        # Write cell data WITH ORIENTATIONS
+        # ====================================================================
+        # CELL DATA
+        # ====================================================================
         f.write(f"\nCELL_DATA {num_cells}\n")
         
-        # Write grain IDs
-        f.write("SCALARS grain_id int 1\n")
+        # Grain IDs
+        f.write("\nSCALARS grain_id int 1\n")
         f.write("LOOKUP_TABLE default\n")
         for k in range(nk):
             for j in range(nj):
                 for i in range(ni):
                     f.write(f"{volume[i,j,k]}\n")
         
-        # Write needle IDs
+        # Needle IDs
         f.write("\nSCALARS needle_id int 1\n")
         f.write("LOOKUP_TABLE default\n")
         for k in range(nk):
             for j in range(nj):
                 for i in range(ni):
-                    needle_id = needle_volume[i,j,k] if needle_volume is not None else volume[i,j,k]
+                    needle_id = needle_volume[i,j,k] if needle_volume is not None else 0
                     f.write(f"{needle_id}\n")
         
-        # Write orientation data if available
-        if needle_directions:
-            # Direction X (c-axis component along X)
-            f.write("\nSCALARS c_axis_x float 1\n")
+        # C-axis (needle direction) components
+        for comp_idx, comp_name in enumerate(['x', 'y', 'z']):
+            f.write(f"\nSCALARS c_axis_{comp_name} float 1\n")
             f.write("LOOKUP_TABLE default\n")
             for k in range(nk):
                 for j in range(nj):
                     for i in range(ni):
                         needle_id = needle_volume[i,j,k] if needle_volume is not None else 0
-                        if needle_id in needle_directions:
-                            f.write(f"{needle_directions[needle_id][0]:.6f}\n")
+                        if needle_id in needle_properties:
+                            value = needle_properties[needle_id]['c_axis'][comp_idx]
+                            f.write(f"{value:.6f}\n")
                         else:
                             f.write("0.0\n")
-            
-            # Direction Y (c-axis component along Y)
-            f.write("\nSCALARS c_axis_y float 1\n")
+        
+        # ====================================================================
+        # EULER ANGLES - ALL THREE NOW!
+        # ====================================================================
+        
+        # phi1 (azimuthal angle) - NEW!
+        if needle_properties:
+            f.write("\nSCALARS euler_phi1 float 1\n")
             f.write("LOOKUP_TABLE default\n")
             for k in range(nk):
                 for j in range(nj):
                     for i in range(ni):
                         needle_id = needle_volume[i,j,k] if needle_volume is not None else 0
-                        if needle_id in needle_directions:
-                            f.write(f"{needle_directions[needle_id][1]:.6f}\n")
+                        if needle_id in needle_properties:
+                            f.write(f"{needle_properties[needle_id]['phi1']:.6f}\n")
                         else:
                             f.write("0.0\n")
-            
-            # Direction Z (c-axis component along Z)
-            f.write("\nSCALARS c_axis_z float 1\n")
-            f.write("LOOKUP_TABLE default\n")
-            for k in range(nk):
-                for j in range(nj):
-                    for i in range(ni):
-                        needle_id = needle_volume[i,j,k] if needle_volume is not None else 0
-                        if needle_id in needle_directions:
-                            f.write(f"{needle_directions[needle_id][2]:.6f}\n")
-                        else:
-                            f.write("0.0\n")
-            
-            # Euler angle Phi (angle from Z-axis in degrees) - main orientation indicator
+        
+        # euler_Phi (polar angle) - EXISTING
+        if needle_properties:
             f.write("\nSCALARS euler_Phi float 1\n")
             f.write("LOOKUP_TABLE default\n")
             for k in range(nk):
                 for j in range(nj):
                     for i in range(ni):
                         needle_id = needle_volume[i,j,k] if needle_volume is not None else 0
-                        if needle_id in needle_directions:
-                            direction = needle_directions[needle_id]
-                            # Phi is angle from Z-axis (rotation of c-axis from vertical)
-                            Phi = np.arccos(np.clip(direction[2], -1, 1))
-                            f.write(f"{np.rad2deg(Phi):.6f}\n")
+                        if needle_id in needle_properties:
+                            f.write(f"{needle_properties[needle_id]['Phi']:.6f}\n")
                         else:
                             f.write("0.0\n")
-            
-            # Angle from Z-axis (same as Phi)
+        
+        # phi2 (twist angle) - NEW!
+        if needle_properties:
+            f.write("\nSCALARS euler_phi2 float 1\n")
+            f.write("LOOKUP_TABLE default\n")
+            for k in range(nk):
+                for j in range(nj):
+                    for i in range(ni):
+                        needle_id = needle_volume[i,j,k] if needle_volume is not None else 0
+                        if needle_id in needle_properties:
+                            f.write(f"{needle_properties[needle_id]['phi2']:.6f}\n")
+                        else:
+                            f.write("0.0\n")
+        
+        # angle_from_z (backward compatibility)
+        if needle_properties:
             f.write("\nSCALARS angle_from_z float 1\n")
             f.write("LOOKUP_TABLE default\n")
             for k in range(nk):
                 for j in range(nj):
                     for i in range(ni):
                         needle_id = needle_volume[i,j,k] if needle_volume is not None else 0
-                        if needle_id in needle_directions:
-                            direction = needle_directions[needle_id]
-                            angle = np.arccos(np.clip(direction[2], -1, 1))
-                            f.write(f"{np.rad2deg(angle):.6f}\n")
+                        if needle_id in needle_properties:
+                            f.write(f"{needle_properties[needle_id]['Phi']:.6f}\n")
                         else:
                             f.write("0.0\n")
         
-        # Write point data for boundary identification
+        # Point data for boundaries (unchanged)
         f.write(f"\nPOINT_DATA {num_points}\n")
-        
-        # Boundary flag: 0=interior, 1=Bottom_Z, 2=Top_Z, 3=Bottom_X, 4=Top_X, 5=Bottom_Y, 6=Top_Y
         f.write("SCALARS boundary_flag int 1\n")
         f.write("LOOKUP_TABLE default\n")
         for k in range(nk+1):
             for j in range(nj+1):
                 for i in range(ni+1):
                     flag = 0
-                    if k == 0:
-                        flag = 1  # Bottom_Z
-                    elif k == nk:
-                        flag = 2  # Top_Z
-                    elif i == 0:
-                        flag = 3  # Bottom_X
-                    elif i == ni:
-                        flag = 4  # Top_X
-                    elif j == 0:
-                        flag = 5  # Bottom_Y
-                    elif j == nj:
-                        flag = 6  # Top_Y
+                    if k == 0: flag = 1
+                    elif k == nk: flag = 2
+                    elif i == 0: flag = 3
+                    elif i == ni: flag = 4
+                    elif j == 0: flag = 5
+                    elif j == nj: flag = 6
                     f.write(f"{flag}\n")
     
-    if needle_directions:
+    if needle_properties:
+        # Get statistics
+        phi1_vals = [p['phi1'] for p in needle_properties.values()]
+        Phi_vals = [p['Phi'] for p in needle_properties.values()]
+        phi2_vals = [p['phi2'] for p in needle_properties.values()]
+        
         print(f"VTK file written: {filename}")
-        print(f"  ✓ Includes orientation data: c_axis_xyz, euler_Phi, angle_from_z")
-        print(f"  ✓ Includes boundary node identification (boundary_flag)")
-        print(f"  ✓ In ParaView: Color by 'euler_Phi' to see c-axis orientations")
-        print(f"  ✓ In ParaView: Color by 'boundary_flag' to see boundary nodes")
-        print(f"  ✓ c-axis is aligned with needle direction (33 component in stiffness)")
+        print(f"  ✓ Complete Euler angles exported:")
+        print(f"    - euler_phi1: [{min(phi1_vals):.1f}, {max(phi1_vals):.1f}]°")
+        print(f"    - euler_Phi:  [{min(Phi_vals):.1f}, {max(Phi_vals):.1f}]°")
+        print(f"    - euler_phi2: [{min(phi2_vals):.1f}, {max(phi2_vals):.1f}]°")
+        print(f"  ✓ Direction vectors: c_axis_x/y/z")
+        print(f"  ✓ Same Euler angles as Exodus (compatible!)")
     else:
         print(f"VTK file written: {filename}")
-        print(f"  ✓ Includes boundary node identification (boundary_flag)")
-        print(f"  Note: No orientation data (center_properties not provided)")
-
-
+        
 def visualize_slices(volume, domain_size, filename_prefix="microstructure"):
     """
     Visualize and save slices through the microstructure

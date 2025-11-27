@@ -41,7 +41,7 @@ def example1_aragonite_coral():
     
     # Parameters matching cold-water coral aragonite
     domain_size = 10  # 200 microns
-    num_centers = 3   # 45 nucleation centers (grains)
+    num_centers = 4   # 45 nucleation centers (grains)
     needle_length_range = (10, 50)  # 20-40 microns
     needles_per_center_range = (5, 25)
     resolution = 20
@@ -49,7 +49,7 @@ def example1_aragonite_coral():
     print("\nGenerating microstructure...")
     volume, needle_volume, center_properties, mesh = radial_needles_more_2d(
         num_centers, domain_size, needle_length_range, needles_per_center_range,
-        resolution, z_constraint_factor=0.1, quasi_2d=True
+        resolution, z_constraint_factor=0.1, quasi_2d=False
     )
     
     # MD-derived aragonite properties
@@ -72,18 +72,19 @@ def example1_aragonite_coral():
         }
     }
     needle_count = 0
+    print('First 6 needles\' properties:')
     for center in center_properties:
         for needle in center['needles']:
             needle_count += 1
             direction = needle['direction']
             mag = np.linalg.norm(direction)
             print(f"   Needle {needle['id']}: direction={direction}, |c|={mag:.6f}")
-            if needle_count >= 3:  # Just show first 3
+            if needle_count >= 6:  # Just show first 3
                 break
-        if needle_count >= 3:
+        if needle_count >= 6:
             break
 
-    print(f"\n   Total needles with direction data: {needle_count}")
+#    print(f"\n   Total needles with direction data: {needle_count}")
     print(f"   ✓ c-axis is aligned with needle direction (33 component)")
 
     print("\nExporting to Abaqus...")
@@ -105,6 +106,13 @@ def example1_aragonite_coral():
     
     print("\nExporting orientation data...")
     export_orientation_data(center_properties, 'tiny_orientations.csv')
+    
+    print("\nExporting to exodus...")
+    export_to_exodus(
+                volume, needle_volume, domain_size,
+                'tiny_aragonite.e',
+                center_properties=center_properties
+            )
     
 #    try:
 #        export_to_exodus(
