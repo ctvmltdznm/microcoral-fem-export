@@ -76,7 +76,7 @@ microstructure-fem-export/
 
 ```bash
 # Clone repository
-git clone https://github.com/yourusername/microstructure-fem-export.git
+git clone https://github.com/ctvmltdznm/microstructure-fem-export.git
 cd microstructure-fem-export
 
 # Install dependencies
