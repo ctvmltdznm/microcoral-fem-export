@@ -1,348 +1,196 @@
-# Microstructure FEM Export Toolkit
+# microcoral-fem-export
 
-**Complete workflow for synthetic microstructure generation, material property conversion, and multi-format FEM export**
-
-[![Python](https://img.shields.io/badge/python-3.8+-blue.svg)](https://www.python.org/downloads/)
+[![Python](https://img.shields.io/badge/python-3.9+-blue.svg)](https://www.python.org/downloads/)
 [![License](https://img.shields.io/badge/license-MIT-green.svg)](LICENSE)
 
-A comprehensive Python toolkit for computational materials science, providing:
-- Synthetic microstructure generation (quasi-2D and 3D)
-- Elastic tensor to engineering constants conversion
-- Multi-format export (Abaqus, Exodus, VTK)
-- Automatic material orientation assignment
-- Ready-to-run boundary conditions
-- Complete MD-to-FEM workflow
+Python toolkit for generating synthetic aragonite microstructures and converting
+them to MOOSE-ready finite element meshes with automatic cohesive zone interface
+classification.
 
-Developed for biomineralized structures (aragonite coral) and polycrystalline metals (BCC iron/steel).
+Developed for cold-water coral biomechanics (aragonite), but applicable to other
+hierarchical biominerals (bone, nacre) and polycrystalline metals.
 
 ---
 
-## Features
-
-### Microstructure Generation
-- Radial needle structures (quasi-2D or full 3D)
-- Grain and needle ID tracking
-- Configurable grain sizes and aspect ratios
-- Quasi-2D layered structures for EBSD comparison
-
-### Material Property Handling
-- **Elastic tensor converter**: 6×6 stiffness matrix → engineering constants
-- Orthotropic and isotropic materials
-- Automatic c-axis alignment for anisotropic materials
-- MD/DFT integration ready
-
-### Export Formats
-- **Abaqus INP**: With orientations and boundary conditions
-- **Exodus II**: For MOOSE framework
-- **VTK**: For ParaView visualization
-- **NumPy**: For custom post-processing
-
-### Advanced Features
-- Automatic boundary node sets (6 faces)
-- Ready-to-run mechanical tests (tension, compression, shear, biaxial)
-- Grain boundary analysis and cohesive zones
-- Misorientation calculations
-- Multi-format mesh conversion
-
----
-
-## Repository Structure
+## Repository structure
 
 ```
-microstructure-fem-export/
-├── README.md                           # This file
-├── LICENSE                             
-├── requirements.txt                    # Dependencies
+microcoral-fem-export/
+├── src/
+│   ├── enhanced_microstructure_export.py     # Volume generation + Exodus export
+│   ├── assign_orientations.py                # Aragonite twin orientation model
+│   ├── assign_orientations_caxis_aligned.py  # Alternative: c-axis = needle direction
+│   ├── convert_to_moose.py                   # Block conversion + interface detection
+│   ├── elastic_tensor_converter.py           # 6x6 stiffness → engineering constants
+│   └── microstructure_utils.py               # Utility functions (Abaqus path)
 │
-├── src/                                # Source code
-│   ├── enhanced_microstructure_export.py   # Main export (with BC)
-│   ├── microstructure_utils.py             # Utility functions
-│   ├── elastic_tensor_converter.py         # Tensor 2 constants converter
-│   └── convert2e.py                        # VTK 2 Exodus converter
+├── examples/
+│   ├── example_coral_rve.py                  # Main MOOSE workflow — start here
+│   └── practical_examples.py                 # Abaqus export + cohesive zones
 │
-├── examples/                           # Example scripts
-│   └── practical_examples.py               # Quick start, examples on coral, optional bcc iron
-│   
-└── docs/                               # Documentation
-    └── COMPLETE_WORKFLOW.md               # Details + workflow
- 
+├── verification/
+│   └── compute_misori_plot.py                # Standalone Mackenzie plot
+│
+└── docs/
+    ├── PIPELINE.md                           # Full pipeline documentation
+    ├── SCRIPTS.md                            # All scripts described
+    └── COMPLETE_WORKFLOW.md                  # Abaqus workflow (legacy)
 ```
 
 ---
 
-## 🚀 Quick Start (30 seconds)
+## Quick start
 
-### Installation
+### Install
 
 ```bash
-# Clone repository
-git clone https://github.com/ctvmltdznm/microstructure-fem-export.git
-cd microstructure-fem-export
-
-# Install dependencies
+git clone https://github.com/ctvmltdznm/microcoral-fem-export.git
+cd microcoral-fem-export
 pip install -r requirements.txt
 ```
 
-### Minimal Example
+### Generate a microstructure
 
-```python
-from src.enhanced_microstructure_export import (
-    radial_needles_more_2d,
-    export_to_abaqus_enhanced
-)
+Edit parameters at the top of the example, then:
 
-# Generate microstructure
-volume, needle_volume, center_properties, _ = radial_needles_more_2d(
-    num_centers=10, domain_size=100, needle_length_range=(10, 20),
-    needles_per_center_range=(10, 20), resolution=30
-)
+```bash
+cd examples
+python example_coral_rve.py
+```
 
-# Export with automatic boundary conditions
-export_to_abaqus_enhanced(
-    volume, needle_volume, center_properties, 100,
-    'model.inp',
-    boundary_conditions={'type': 'tension_z', 'displacement': 1.0}
-)
+This produces `aragonite.e` — single-block Exodus with element variables
+`grain_id`, `needle_id`, `euler_phi1`, `euler_Phi`, `euler_phi2`.
 
-# Ready to run: abaqus job=model
+### Convert for MOOSE
+
+```bash
+cd ..
+python src/convert_to_moose.py examples/aragonite.e examples/aragonite_moose.e --verify
+```
+
+The `--verify` flag produces `aragonite_moose_mackenzie.png` — compare it against
+your EBSD Mackenzie plot to confirm the orientation model is correct.
+
+### Check outputs
+
+```
+examples/
+  aragonite_moose.e                     one block per needle, all element vars preserved
+  aragonite_moose_mesh_info.json        mesh bounds + block-to-grain mapping
+  aragonite_moose_interface_map.json    every interface typed intra_grain / inter_grain
+  aragonite_moose_moose.i              paste-ready [Mesh], [InterfaceKernels], [BCs]
+  aragonite_moose_mackenzie.png         orientation verification (with --verify)
+```
+
+### Verify orientation model (optional, before a production run)
+
+```bash
+python src/assign_orientations.py \
+    --plot --n-grains 100 --needles-per-grain 120 --sigma-twin 0.5
+```
+
+Compare `synthetic_mackenzie.png` against your EBSD Mackenzie plot. Twin peaks
+should appear at 52.4°, 57.2°, 63.8°.
+
+### Run in MOOSE
+
+Paste `aragonite_moose_moose.i` into your simulation input, then add
+`[GlobalParams]`, `[Modules/TensorMechanics/Master]`, and `[Materials]` with
+your CZM parameters. See `docs/PIPELINE.md` for a complete MOOSE input template.
+
+---
+
+## What the pipeline does
+
+```
+example_coral_rve.py
+  radial_needles_more_2d()    — parametric voxel RVE
+  assign_orientations()        — twin model, integrated into export
+  export_to_exodus()           — single-block Exodus with Euler angles
+          |
+          v
+convert_to_moose.py
+  organise elements into blocks (one per needle or grain)
+  detect face-sharing block pairs → classify intra/inter-grain
+  extract mesh bounds for ParsedGenerateSideset
+  write mesh_info.json, interface_map.json, _moose.i snippet
+  (optional) compute adjacent-element misorientation → Mackenzie plot
 ```
 
 ---
 
-## 🔬 Complete Workflow
+## Orientation model summary
 
-### Step 1: Convert Elastic Properties
+Within a sclerodermite, all needles share one c-axis direction. phi2 (rotation
+of a/b axes around c) varies per needle by drawing a twin variant:
 
-```python
-from src.elastic_tensor_converter import (
-    stiffness_to_compliance,
-    compliance_to_engineering_constants,
-    validate_orthotropic_symmetry,
-    format_for_abaqus
-)
+| Variant | Misorientation | Default probability |
+|---|---|---|
+| Low-angle | ~11° | 10% |
+| Mirror twin | 52.4° | 20% |
+| (310) twin | 57.2° | 25% |
+| (110) twin (dominant) | 63.8° | 45% |
 
-# Your 6×6 stiffness matrix in GPa
-C_matrix = np.array([
-    [171.8,  57.5,  30.2,   0.0,   0.0,   0.0],
-    [ 57.5, 106.7,  46.9,   0.0,   0.0,   0.0],
-    [ 30.2,  46.9,  84.2,   0.0,   0.0,   0.0],
-    [  0.0,   0.0,   0.0,  42.1,   0.0,   0.0],
-    [  0.0,   0.0,   0.0,   0.0,  31.1,   0.0],
-    [  0.0,   0.0,   0.0,   0.0,   0.0,  46.6]
-])
+Probabilities and scatter widths calibrated from EBSD Mackenzie plot data
+(aragonite coral). All parameters are tunable via `OrientationParams`.
 
-# Convert to engineering constants
-S = stiffness_to_compliance(C_matrix)
-constants = compliance_to_engineering_constants(S)
-valid, errors = validate_orthotropic_symmetry(constants)
-
-# Get Abaqus-ready format (check whether syntax formatting is correct)
-abaqus_line = format_for_abaqus(constants, unit='MPa')
-print(abaqus_line)
-# Output: E1, E2, E3, nu12, nu13, nu23, G12, G13
- G23
-```
-
-### Step 2: Generate Microstructure
-
-```python
-from src.enhanced_microstructure_export import radial_needles_more_2d
-
-volume, needle_volume, center_properties, _ = radial_needles_more_2d(
-    num_centers=45,
-    domain_size=200,
-    needle_length_range=(20, 40),
-    needles_per_center_range=(10, 35),
-    resolution=100,
-    quasi_2d=True
-)
-```
-
-### Step 3: Export with Properties and BCs
-
-```python
-from src.enhanced_microstructure_export import export_to_abaqus_enhanced
-
-material_props = {
-    'needle_material': {
-        'name': 'Aragonite',
-        'type': 'orthotropic',
-        'constants': [
-            constants['E1']*1000,  constants['E2']*1000,  constants['E3']*1000,
-            constants['nu12'], constants['nu13'], constants['nu23'],
-            constants['G12']*1000, constants['G13']*1000, constants['G23']*1000
-        ]
-    }
-}
-
-export_to_abaqus_enhanced(
-    volume, needle_volume, center_properties, 200,
-    'complete_model.inp',
-    material_properties=material_props,
-    boundary_conditions={'type': 'tension_z', 'displacement': 2.0}
-)
-```
-
-### Step 4: Convert to Other Formats
-
-```python
-from src.enhanced_microstructure_export import export_vtk_unstructured
-from src.convert2e import MeshConverter
-
-# Export to VTK
-export_vtk_unstructured(
-    volume, needle_volume, 200, 'model.vtk',
-    center_properties=center_properties
-)
-
-# Convert VTK to Exodus for MOOSE (from cmd: python convert2e.py your_setup.vtk  --organize-by needle_id (or grain_id // or authomatically)
-converter = MeshConverter('model.vtk', 'model.e', organize_by='grain_id')
-converter.convert()
-```
+An alternative model where c-axis = needle morphological direction is available
+in `src/assign_orientations_caxis_aligned.py`. See `docs/SCRIPTS.md` for a
+discussion of when each model applies.
 
 ---
 
-## 📚 Documentation
+## Interface classification
 
-### Quick Links
-- **[Complete Workflow](COMPLETE_WORKFLOW.md)** - End-to-end examples
+Every internal block-pair interface is typed automatically:
 
-### Key Modules
+| Type | Condition | Physical meaning |
+|---|---|---|
+| `intra_grain` | same grain_id | Needle-needle within one sclerodermite |
+| `inter_grain` | different grain_id | Across sclerodermite boundaries |
 
-#### 1. `enhanced_microstructure_export.py`
-Main module for microstructure generation and export.
-
-**Key Functions:**
-- `radial_needles_more_2d()` - Generate synthetic microstructures
-- `export_to_abaqus_enhanced()` - Export with BCs and orientations
-- `export_vtk_unstructured()` - VTK with orientation data
-- `export_to_exodus()` - Direct Exodus II export
-
-#### 2. `elastic_tensor_converter.py`
-Convert elastic tensors to FEM-ready constants.
-
-**Key Functions:**
-- `stiffness_to_compliance()` - C to S matrix
-- `compliance_to_engineering_constants()` - Extract E, nu, G
-- `validate_orthotropic_symmetry()` - Check validity
-- `format_for_abaqus()` - Ready-to-paste format
-
-#### 3. `convert2e.py`
-Universal mesh converter to Exodus II format.
-
-**Key Features:**
-- Reorganizes elements by grain_id/needle_id
-- Proper ParaView block organization
-- Supports VTK, Abaqus INP, FEBio formats
-
-#### 4. `microstructure_utils.py`
-Utility functions for advanced operations.
-
-**Key Functions:**
-- `generate_random_texture()` - Crystallographic orientations
-- `euler_to_rotation_matrix()` - Orientation handling
-- `find_grain_boundary_faces()` - GB detection
-- `compute_misorientation()` - GB characterization
-- `create_abaqus_cohesive_section()` - CZM for GBs
+The MOOSE snippet assigns different `HomogenizedExponentialCZM` material blocks
+to each type. You supply the CZM parameters for each type in `[Materials]`.
 
 ---
 
-## 🎯 Use Cases
+## Two paths
 
-### Cold-Water Coral Biomechanics
+**MOOSE path (this paper):**
+`example_coral_rve.py` → `convert_to_moose.py` → MOOSE
 
-```python
-# Generate quasi-2D aragonite structure
-volume, needle_volume, props, _ = radial_needles_more_2d(
-    num_centers=45, domain_size=200,
-    needle_length_range=(20, 40),
-    needles_per_center_range=(10, 35),
-    resolution=100, quasi_2d=True
-)
-
-# Use MD-derived orthotropic properties
-# (c-axis automatically aligned with needle direction)
-material_props = {
-    'needle_material': {
-        'name': 'Aragonite',
-        'type': 'orthotropic',
-        'constants': [...]  # From elastic_tensor_converter
-    }
-}
-
-# Export for mechanical testing
-export_to_abaqus_enhanced(..., boundary_conditions={'type': 'tension_z', 'displacement': 2.0})
-```
-
-### Grain Boundary Engineering (BCC Iron/Steel)
-
-```python
-# Generate polycrystalline structure
-volume, needle_volume, props, _ = radial_needles_more_2d(
-    num_centers=100, domain_size=1000,
-    resolution=200, quasi_2d=False  # Full 3D
-)
-
-# Assign random texture
-from src.microstructure_utils import generate_random_texture
-orientations = generate_random_texture(num_grains, 'random')
-
-# Find and characterize grain boundaries
-boundary_faces = find_grain_boundary_faces(volume)
-# Apply misorientation-dependent cohesive zones
-```
-
-### MOOSE Framework Integration
-
-```python
-# Generate and export to Exodus
-export_to_exodus(volume, needle_volume, domain_size, 'model.e')
-
-# Or convert existing VTK
-converter = MeshConverter('model.vtk', organize_by='grain_id')
-converter.convert()  # Creates model.e
-
-# Use in MOOSE input file:
-# [Mesh]
-#   file = model.e
-# []
-```
+**Abaqus path (also supported):**
+`practical_examples.py` → Abaqus INP
+See `docs/COMPLETE_WORKFLOW.md`.
 
 ---
 
-## 📊 Boundary Condition Types
+## Dependencies
 
-| Type | Description | Fixed | Applied |
-|------|-------------|-------|---------|
-| `tension_z` | Uniaxial tension | Bottom_Z (all DOFs) | Top_Z (Z-disp) |
-| `compression_z` | Uniaxial compression | Bottom_Z (all DOFs) | Top_Z (-Z-disp) |
-| `shear_xy` | Simple shear | Bottom_Z (all DOFs) | Top_Z (X-disp, Z-constrained) |
-| `biaxial_xy` | Biaxial tension | Bottom faces | Top_X, Top_Y |
-| `custom` | User-defined | As specified | As specified |
-
-All models export with 6 boundary node sets: `Bottom_Z`, `Top_Z`, `Bottom_X`, `Top_X`, `Bottom_Y`, `Top_Y`.
-
----
-
-## 🔧 Requirements
-
-### Core Requirements
-```
-numpy >= 1.20
-scipy >= 1.7
-matplotlib >= 3.4
-pyvista >= 0.32
-```
-
-### Optional Requirements
-```
-meshio >= 5.0  # For Exodus II export
-```
-
-Install all:
 ```bash
 pip install -r requirements.txt
+# numpy scipy matplotlib pyvista meshio netCDF4
 ```
 
 ---
 
+## Known limitations
+
+- **Twin model is phi2-only.** Full orthorhombic twin rotations also affect
+  phi1/Phi slightly. The phi2-only approximation is justified for needles within
+  one sclerodermite (nearly co-axial c-axes).
+- **No inter-sclerodermite twin constraint.** Adjacent sclerodermites receive
+  independent base orientations.
+- **GAN integration not yet complete.** The key missing piece is
+  `assign_orientations_from_morphology.py` — PCA-based c-axis fitting for
+  segmented volumes (grain_id/needle_id labels) that lack the needle direction
+  vectors produced by the parametric generator. Once implemented, the rest of
+  the pipeline (`export_to_exodus` + `convert_to_moose.py`) applies unchanged.
+- **Small RVE in this paper.** Production-scale interface-resolved simulations
+  are noted as future work.
+
+---
+
+## License
+
+MIT — see [LICENSE](LICENSE).
