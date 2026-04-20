@@ -7,11 +7,14 @@ Generates artificial grain boundary networks with needle structures and exports 
 Enhanced version with improved material handling and Exodus II support
 """
 
+from __future__ import annotations
+from typing import Optional
 import numpy as np
 import pyvista as pv
 import matplotlib.pyplot as plt
 from scipy.ndimage import distance_transform_edt
 from matplotlib.colors import LinearSegmentedColormap
+from assign_orientations import OrientationParams, assign_orientations, build_needle_euler_lookup
 import os
 
 def generate_nucleation_centers(num_centers, bounds, min_distance=None, z_constraint=None):
@@ -722,157 +725,186 @@ def export_to_abaqus_enhanced(volume, needle_volume, center_properties, domain_s
     else:
         print(f"  ✓ Minimal step (add boundary conditions manually)")
 
-def export_to_exodus(volume, needle_volume, domain_size, filename, 
-                    center_properties=None, spacing=None, origin=None):
+"""
+Update to export_to_exodus() function in
+enhanced_microstructure_export.py, with assign_orientations integrated.
+
+The function signature is backwards-compatible — the only new optional
+arguments are `orientation_params` and `orientation_seed`.
+
+WHAT CHANGED vs THE OLD VERSION
+--------------------------------
+Old:  phi1/Phi from c-axis direction (correct)
+      phi2 = np.random.seed(needle_id); np.random.uniform(0, 2*pi)  ← random, no physics
+
+New:  phi1/Phi from c-axis direction (unchanged)
+      phi2 from twin model via assign_orientations()  ← physically correct
+"""
+
+def export_to_exodus(
+    volume,
+    needle_volume,
+    domain_size,
+    filename,
+    center_properties=None,
+    spacing=None,
+    origin=None,
+    orientation_params=None,    # NEW: OrientationParams instance (or None → defaults)
+    orientation_seed: int = 42, # NEW: reproducibility seed
+):
     """
-    Export to Exodus II format with Euler angles
-    
-    CHANGED: Direct Euler angle calculation from needle direction (c-axis)
+    Export microstructure to Exodus II format with physically correct Euler angles.
+
+    Euler angles (Bunge ZXZ convention, degrees) are stored as element variables:
+        euler_phi1  — azimuthal angle of c-axis in XY plane
+        euler_Phi   — polar angle of c-axis from Z  (= needle tilt)
+        euler_phi2  — rotation of a/b axes around c-axis  (twin model)
+
+    The c-axis is aligned with the needle long axis (needle['direction']).
+    phi2 is assigned via the aragonite twin model in assign_orientations.py:
+        - one phi2_base per sclerodermite (random, uniform 0-360°)
+        - each needle draws a twin variant (110, 310, mirror, or low-angle)
+          as ± half_angle around phi2_base
+
+    Parameters
+    ----------
+    volume : np.ndarray (ni, nj, nk)  int
+        Grain ID per voxel.
+    needle_volume : np.ndarray (ni, nj, nk)  int
+        Needle ID per voxel.
+    domain_size : float
+        Physical size of the cubic domain.
+    filename : str
+        Output .e file path.
+    center_properties : list, optional
+        Output of radial_needles_more_2d().  Required for orientation data.
+        If None, all Euler angles are written as 0.
+    spacing : tuple of 3 floats, optional
+        Voxel spacing (dx, dy, dz).  Defaults to domain_size/resolution.
+    origin : tuple of 3 floats, optional
+        Grid origin.  Defaults to (0, 0, 0).
+    orientation_params : OrientationParams, optional
+        Twin model parameters.  None → EBSD-calibrated defaults.
+    orientation_seed : int
+        Random seed for reproducible orientation assignment.  Default: 42.
     """
     try:
         import meshio
         import netCDF4 as nc
     except ImportError:
         print("meshio and netCDF4 required for Exodus export")
-        print("Install with: pip install meshio netCDF4 --break-system-packages")
+        print("  pip install meshio netCDF4 --break-system-packages")
         return
-    
+
+    from assign_orientations import (
+        OrientationParams, assign_orientations, build_needle_euler_lookup
+    )
+
     ni, nj, nk = volume.shape
-    
+
     if spacing is None:
         spacing = (domain_size/ni, domain_size/nj, domain_size/nk)
     if origin is None:
         origin = (0, 0, 0)
-    
-    # Build lookup for needle directions (these ARE the c-axes!)
-    needle_directions = {}
+
+    # ── Assign orientations ───────────────────────────────────────────────────
     if center_properties is not None:
-        for center in center_properties:
-            for needle in center['needles']:
-                needle_directions[needle['id']] = needle['direction']
-    
-    # Create points
+        if orientation_params is None:
+            orientation_params = OrientationParams()
+        assign_orientations(center_properties, orientation_params, seed=orientation_seed)
+        euler_lookup = build_needle_euler_lookup(center_properties)
+    else:
+        euler_lookup = {}
+        print("  WARNING: center_properties not provided — Euler angles will be 0")
+
+    # ── Build hex mesh ────────────────────────────────────────────────────────
     points = []
     for k in range(nk+1):
         for j in range(nj+1):
             for i in range(ni+1):
-                x = i * spacing[0] + origin[0]
-                y = j * spacing[1] + origin[1]
-                z = k * spacing[2] + origin[2]
-                points.append([x, y, z])
+                points.append([
+                    i * spacing[0] + origin[0],
+                    j * spacing[1] + origin[1],
+                    k * spacing[2] + origin[2],
+                ])
     points = np.array(points)
-    
+
     def node_index(i, j, k):
         return i + j*(ni+1) + k*(ni+1)*(nj+1)
-    
-    cells = []
-    grain_ids_list = []
-    needle_ids_list = []
-    euler_phi1_list = []
-    euler_Phi_list = []
-    euler_phi2_list = []
-    
+
+    cells         = []
+    grain_ids     = []
+    needle_ids    = []
+    euler_phi1    = []
+    euler_Phi     = []
+    euler_phi2    = []
+
     for k in range(nk):
         for j in range(nj):
             for i in range(ni):
-                elem_nodes = [
-                    node_index(i, j, k),
-                    node_index(i+1, j, k),
-                    node_index(i+1, j+1, k),
-                    node_index(i, j+1, k),
-                    node_index(i, j, k+1),
-                    node_index(i+1, j, k+1),
+                cells.append([
+                    node_index(i,   j,   k  ),
+                    node_index(i+1, j,   k  ),
+                    node_index(i+1, j+1, k  ),
+                    node_index(i,   j+1, k  ),
+                    node_index(i,   j,   k+1),
+                    node_index(i+1, j,   k+1),
                     node_index(i+1, j+1, k+1),
-                    node_index(i, j+1, k+1)
-                ]
-                cells.append(elem_nodes)
-                grain_ids_list.append(volume[i, j, k])
-                
-                needle_id = needle_volume[i, j, k] if needle_volume is not None else volume[i, j, k]
-                needle_ids_list.append(needle_id)
-                
-                # Direct Euler angle calculation from c-axis (needle direction)
-                if needle_id in needle_directions:
-                    c_axis = needle_directions[needle_id]
-                    c = c_axis / np.linalg.norm(c_axis)
-                    
-                    # Spherical coordinates of c-axis
-                    phi1 = np.arctan2(c[1], c[0])
-                    Phi = np.arccos(np.clip(c[2], -1, 1))
-                    
-                    # Random phi2 per needle (twist around c-axis)
-                    np.random.seed(needle_id)
-                    phi2 = np.random.uniform(0, 2*np.pi)
-                    
-                    phi1 = np.degrees(phi1) % 360
-                    Phi = np.degrees(Phi)
-                    phi2 = np.degrees(phi2)
-                    
-                    euler_phi1_list.append(phi1)
-                    euler_Phi_list.append(Phi)
-                    euler_phi2_list.append(phi2)
+                    node_index(i,   j+1, k+1),
+                ])
+                g  = int(volume[i, j, k])
+                n  = int(needle_volume[i, j, k]) if needle_volume is not None else g
+                grain_ids.append(g)
+                needle_ids.append(n)
+
+                if n in euler_lookup:
+                    e = euler_lookup[n]
+                    euler_phi1.append(e['phi1'])
+                    euler_Phi.append(e['Phi'])
+                    euler_phi2.append(e['phi2'])
                 else:
-                    euler_phi1_list.append(0.0)
-                    euler_Phi_list.append(0.0)
-                    euler_phi2_list.append(0.0)
-    
-    # Create mesh
+                    euler_phi1.append(0.0)
+                    euler_Phi.append(0.0)
+                    euler_phi2.append(0.0)
+
+    # ── Write base Exodus ─────────────────────────────────────────────────────
     mesh = meshio.Mesh(
         points=points,
-        cells=[("hexahedron", np.array(cells))],
-        cell_data={}
+        cells=[('hexahedron', np.array(cells))],
+        cell_data={},
     )
-    
-    meshio.write(filename, mesh, file_format="exodus")
-    
-    # Add element variables
-    exo = nc.Dataset(filename, 'r+')
-    
-    try:
-        num_vars = 5
-        exo.createDimension('num_elem_var', num_vars)
-        
-        name_var = exo.createVariable('name_elem_var', 'S1', ('num_elem_var', 'len_string'))
-        var_names = ['grain_id', 'needle_id', 'euler_phi1', 'euler_Phi', 'euler_phi2']
-        
-        for i, vname in enumerate(var_names):
-            name_str = vname.ljust(33, '\x00')
-            name_array = np.array([c.encode('utf-8') for c in name_str], dtype='S1')
-            name_var[i, :] = name_array
-        
-        var_data = [grain_ids_list, needle_ids_list, euler_phi1_list, euler_Phi_list, euler_phi2_list]
-        
-        for var_idx, data in enumerate(var_data):
-            var_name = f'vals_elem_var{var_idx+1}eb1'
-            var = exo.createVariable(var_name, 'f8', ('time_step', 'num_el_in_blk1'))
-            var[0, :] = np.array(data, dtype=np.float64)
-        
-    finally:
-        exo.close()
-    
-    phi1_arr = np.array(euler_phi1_list)
-    Phi_arr = np.array(euler_Phi_list)
-    phi2_arr = np.array(euler_phi2_list)
-    
-    phi1_nonzero = phi1_arr[phi1_arr > 0]
-    phi2_nonzero = phi2_arr[phi2_arr > 0]
-    
-    print(f"Exodus II file written: {filename}")
-    print(f"  Total elements: {len(cells)}")
-    print(f"  ✓ Euler angles from needle direction (c-axis):")
-    print(f"    - phi1: [{phi1_nonzero.min():.1f}, {phi1_nonzero.max():.1f}]°")
-    print(f"    - Phi:  [{Phi_arr.min():.1f}, {Phi_arr.max():.1f}]°")
-    print(f"    - phi2: [{phi2_nonzero.min():.1f}, {phi2_nonzero.max():.1f}]°")
-    
-    phi1_unique = len(np.unique(phi1_nonzero))
-    phi2_unique = len(np.unique(phi2_nonzero))
-    print(f"  ✓ Unique values: phi1={phi1_unique}, phi2={phi2_unique}")
-    
-    if phi1_unique > 1:
-        print(f"  ✓ SUCCESS: phi1 varies across grains!")
-    if phi2_unique > 10:
-        print(f"  ✓ SUCCESS: phi2 varies across needles!")
+    meshio.write(filename, mesh, file_format='exodus')
 
+    # ── Patch element variables via netCDF4 ───────────────────────────────────
+    var_names = ['grain_id', 'needle_id', 'euler_phi1', 'euler_Phi', 'euler_phi2']
+    var_data  = [grain_ids, needle_ids, euler_phi1, euler_Phi, euler_phi2]
+
+    with nc.Dataset(filename, 'r+') as exo:
+        exo.createDimension('num_elem_var', len(var_names))
+        name_var = exo.createVariable('name_elem_var', 'S1',
+                                      ('num_elem_var', 'len_string'))
+        for i, vname in enumerate(var_names):
+            s = vname.ljust(33, '\x00')
+            name_var[i, :] = np.array([c.encode('utf-8') for c in s], dtype='S1')
+
+        for vi, (data, vname) in enumerate(zip(var_data, var_names)):
+            var = exo.createVariable(f'vals_elem_var{vi+1}eb1', 'f8',
+                                     ('time_step', 'num_el_in_blk1'))
+            var[0, :] = np.array(data, dtype=np.float64)
+
+    # ── Summary ───────────────────────────────────────────────────────────────
+    phi1_arr = np.array(euler_phi1); phi1_nz = phi1_arr[phi1_arr > 0]
+    Phi_arr  = np.array(euler_Phi)
+    phi2_arr = np.array(euler_phi2); phi2_nz = phi2_arr[phi2_arr > 0]
+
+    print(f"Exodus II written: {filename}")
+    print(f"  Elements: {len(cells):,}")
+    if len(phi1_nz):
+        print(f"  phi1: [{phi1_nz.min():.1f}, {phi1_nz.max():.1f}]°")
+        print(f"  Phi:  [{Phi_arr.min():.1f},  {Phi_arr.max():.1f}]°")
+        print(f"  phi2: [{phi2_nz.min():.1f}, {phi2_nz.max():.1f}]°  "
+              f"(twin model, seed={orientation_seed})")
+        
 def compute_local_coordinate_system(direction):
     """
     Compute complete orthonormal coordinate system from primary direction
