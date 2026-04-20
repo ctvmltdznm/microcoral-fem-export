@@ -1,7 +1,7 @@
-Note: This document describes the Abaqus export workflow - generating INP files with material orientations and boundary conditions for use in Abaqus.
+**Note**: *This document describes the Abaqus export workflow - generating INP files with material orientations and boundary conditions for use in Abaqus.
 For the MOOSE workflow (multi-block Exodus + CZM interface classification),
 see PIPELINE.md instead.
-Both workflows share the same microstructure generator (src/enhanced_microstructure_export.py). The Abaqus path uses src/microstructure_utils.py; the MOOSE path uses src/assign_orientations.py and src/convert_to_moose.py.
+Both workflows share the same microstructure generator (src/enhanced_microstructure_export.py). The Abaqus path uses src/microstructure_utils.py; the MOOSE path uses src/assign_orientations.py and src/convert_to_moose.py.*
 
 # Complete Workflow Guide
 
