@@ -131,31 +131,6 @@ python src/convert_to_moose.py input.e output.e [--organize-by needle_id|grain_i
 
 ---
 
-### `convert2e.py`
-
-**Role:** Converts VTK files (with orientation data) to Exodus format.
-
-**History:** This was the original MOOSE conversion tool, created when the
-pipeline was: generate → VTK → convert2e.py → patch manually. It reorganises
-elements by grain_id or needle_id into separate Exodus blocks, and computes
-Euler angles from c/a/b axis vectors stored in the VTK.
-
-**Current relevance:**
-- Superseded by `convert_to_moose.py` for the parametric generation path
-- Still needed for the GAN path: GAN-generated volumes will likely be produced
-  as VTK or numpy arrays, and `convert2e.py` handles the VTK → Exodus step
-- Useful for re-converting existing `.vtk` files from before the new pipeline
-
-**CLI:**
-```bash
-python src/convert2e.py microstructure.vtk -o mesh.e --organize-by needle_id
-```
-
-**Required VTK fields:** `c_axis_x/y/z`, `a_axis_x/y/z`, `b_axis_x/y/z`,
-`grain_id`, `needle_id`.
-
----
-
 ### `elastic_tensor_converter.py`
 
 **Role:** Converts 6×6 stiffness matrices (from MD/DFT) to engineering constants
