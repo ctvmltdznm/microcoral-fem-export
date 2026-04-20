@@ -11,8 +11,8 @@ classification. Also covers the legacy Abaqus path and the planned GAN path.
 Three paths exist. The **MOOSE path** is the primary one for this paper.
 
 ```
-                        ┌── MOOSE path (primary) ──────────────────────────────┐
-                        │                                                        │
+                        ┌── MOOSE path (primary) ───────────────────────────────┐
+                        │                                                       │
 MD/DFT properties       │  examples/example_coral_rve.py                        │
        │                │    radial_needles_more_2d()  → voxel RVE              │
        ▼                │    assign_orientations()     → twin model (integrated)│
@@ -24,23 +24,23 @@ Engineering             │    → multi-block .e   (1 block per needle or grain
 constants               │    → mesh_info.json   (bounds + block-to-grain map)   │
                         │    → interface_map.json (all interfaces typed)        │
                         │    → _moose.i snippet (Mesh + InterfaceKernels + BCs) │
-                        └────────────────────────────────────────────────────────┘
+                        └───────────────────────────────────────────────────────┘
 
-                        ┌── Abaqus / legacy path ──────────────────────────────┐
-                        │                                                        │
-                        │  examples/practical_examples.py                        │
+                        ┌── Abaqus / legacy path ───────────────────────────────┐
+                        │                                                       │
+                        │  examples/practical_examples.py                       │
                         │    radial_needles_more_2d()  → voxel RVE              │
-                        │    export_to_abaqus_enhanced() → .inp with BCs       │
-                        │    export_vtk_unstructured() → .vtk for ParaView     │
-                        │    [optional] convert2e.py   → .e from VTK           │
-                        └────────────────────────────────────────────────────────┘
+                        │    export_to_abaqus_enhanced() → .inp with BCs        │
+                        │    export_vtk_unstructured() → .vtk for ParaView      │
+                        │    [optional] convert2e.py   → .e from VTK            │
+                        └───────────────────────────────────────────────────────┘
 
-                        ┌── GAN path (future) ─────────────────────────────────┐
-                        │                                                        │
-                        │  GAN-generated segmented volume  →  src/convert2e.py │
+                        ┌── GAN path (future) ──────────────────────────────────┐
+                        │                                                       │
+                        │  GAN-generated segmented volume  →  src/convert2e.py  │
                         │    [pending] orientation assignment from morphology   │
                         │    same convert_to_moose.py step as MOOSE path        │
-                        └────────────────────────────────────────────────────────┘
+                        └───────────────────────────────────────────────────────┘
 ```
 
 ---
@@ -241,30 +241,31 @@ block-pair interface:
 
 ---
 
-## Legacy path — Abaqus / convert2e
+## Legacy path — Abaqus / old MOOSE workflow
 
-Before `convert_to_moose.py` existed, the MOOSE workflow used `convert2e.py`
-as an intermediate step:
+Before the current pipeline existed, two separate intermediate steps were used
+to prepare files for MOOSE:
 
+**Old workflow (three steps):**
 ```
-enhanced_microstructure_export.py  →  .vtk
-                                       │
-                          convert2e.py  →  .e (organised by grain/needle ID)
-                                       │
-                     [manual patch]    →  MOOSE input (ParsedGenerateSideset etc.)
+enhanced_microstructure_export.py  →  .vtk  (with c/a/b axis vectors per element)
+        │
+        convert2e.py  →  single-block .e  (computed Euler angles from axis vectors)
+        │
+        assign_exodus_blocks.py  →  multi-block .e  (reorganised by grain/needle ID)
+        │
+        [manual]  →  MOOSE input  (ParsedGenerateSideset written by hand)
 ```
 
-`convert2e.py` reads a VTK file with c-axis/orientation data and writes a
-multi-block Exodus with Euler angles as element variables. It is now superseded
-for the parametric generation path by `convert_to_moose.py`, which handles
-orientation export + block conversion + interface detection in one step.
+Both `convert2e.py` and `assign_exodus_blocks.py` are now deleted — their
+functionality is fully covered by `export_to_exodus()` (with integrated
+orientation assignment) and `convert_to_moose.py` (block conversion + interface
+detection + MOOSE snippet generation).
 
-`convert2e.py` remains relevant for:
-1. Re-converting existing `.vtk` files produced before the new pipeline
-2. The GAN path (see below)
-
-For the Abaqus export path (generating `.inp` files for Abaqus), see
+For the **Abaqus export path** (generating `.inp` files), see
 `examples/practical_examples.py` and `docs/COMPLETE_WORKFLOW.md`.
+This path uses `export_to_abaqus_enhanced()` and `microstructure_utils.py`
+and remains fully functional.
 
 ---
 
@@ -274,33 +275,39 @@ The planned workflow for GAN-generated microstructures:
 
 ```
 GAN-generated volume
-  → segmented labels (grain_id / needle_id per voxel)
+  → segmented labels (grain_id / needle_id per voxel, as numpy array or VTK)
   → [pending] assign_orientations_from_morphology.py
       PCA on voxel coordinates per needle → fit c-axis direction
       same twin model as assign_orientations.py
-  → convert2e.py or export_to_exodus() → single-block .e
+  → export_to_exodus() → single-block .e with Euler angles
   → convert_to_moose.py → MOOSE-ready outputs (same as primary path)
 ```
 
 **What is already in place:**
-- `src/convert2e.py` — reads VTK with orientation data, writes Exodus
 - `src/assign_orientations.py` — twin model works independently of how the
   morphology was generated; it only needs `center_properties` with needle
-  direction vectors
-- `src/convert_to_moose.py` — works on any multi-block Exodus, regardless of origin
+  direction vectors, which the morphology fitting step would provide
+- `src/convert_to_moose.py` — works on any single-block Exodus, regardless
+  of how it was generated
 
 **What is not yet implemented:**
 - `assign_orientations_from_morphology.py` — PCA-based c-axis fitting for
-  segmented volumes that lack `center_properties` (no needle direction vectors)
+  segmented volumes that lack `center_properties` (no needle direction vectors
+  from the parametric generator); this is the key missing piece for the GAN path
 - GAN training / inference code
 - 2D-to-3D reconstruction from experimental EBSD
 
-**What we expect to provide / request from GAN collaborators:**
-- Segmented 3D volume as VTK or numpy array with `grain_id` and `needle_id`
-  labels per voxel
-- Ideally with crystallographic orientation encoded as additional channels
-  (phi1, Phi, phi2 per voxel) so that the GAN learns to generate physically
-  correct orientations directly
+**What we expect from GAN collaborators:**
+- Segmented 3D volume as numpy array or VTK with `grain_id` and `needle_id`
+  labels per voxel — no pre-computed orientation data required
+- The orientation assignment step handles crystallography separately from
+  morphology, so the GAN only needs to get the geometry right
+
+**Note on `convert2e.py` (removed):** An earlier script `convert2e.py` converted
+VTK files that contained full rotation matrix data (c/a/b axis vectors per element)
+to Exodus. It required pre-computed orientation data in the VTK and is now
+superseded: the parametric path uses `export_to_exodus()` directly, and the GAN
+path will use `assign_orientations_from_morphology.py` on raw segmented labels.
 
 ---
 
