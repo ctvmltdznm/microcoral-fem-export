@@ -127,40 +127,124 @@ Outputs:
 
 ### Step 3: Run in MOOSE
 
-Paste `_moose.i` into your simulation input. Add `[Materials]`:
+The `_moose.i` file contains `[Mesh]`, a commented `[Physics][SolidMechanics][CohesiveZone]`
+stub, `[Materials]` with parameter placeholders, and `[BCs]`.
+
+**Verify boundary names first** — `BreakMeshByBlockGenerator` naming depends on block IDs:
+
+```bash
+mpirun -n 1 ./aragonite-opt -i sim.i --mesh-only
+```
+
+A complete simulation input (based on the working 4-grain example in
+`examples/grain_interfaces.i`):
 
 ```ini
+[Mesh]
+  # paste from _moose.i
+[]
+
 [GlobalParams]
   displacements = 'disp_x disp_y disp_z'
 []
 
-[Modules/TensorMechanics/Master]
-  [all]
-    strain = FINITE
-    add_variables = true
+[Physics]
+  [SolidMechanics]
+    [QuasiStatic]
+      [bulk]
+        strain = FINITE
+        incremental = true
+        add_variables = true
+        generate_output = 'stress_xx stress_yy stress_zz vonmises_stress'
+      []
+    []
+    # CohesiveZone sits inside SolidMechanics, alongside QuasiStatic
+    [CohesiveZone]
+      [intra_grain_czm]
+        boundary = 'interface_1_2 interface_1_3 ...'  # from _moose.i
+        strain = FINITE
+        generate_output = 'normal_traction tangent_traction normal_jump tangent_jump'
+      []
+      [inter_grain_czm]                               # if inter-grain exists
+        boundary = 'interface_3_7 ...'
+        strain = FINITE
+        generate_output = 'normal_traction tangent_traction normal_jump tangent_jump'
+      []
+    []
   []
+[]
+
+[AuxVariables]
+  [euler_phi1] order = CONSTANT  family = MONOMIAL  initial_from_file_var = euler_phi1 []
+  [euler_Phi]  order = CONSTANT  family = MONOMIAL  initial_from_file_var = euler_Phi  []
+  [euler_phi2] order = CONSTANT  family = MONOMIAL  initial_from_file_var = euler_phi2 []
+  [grain_id]   order = CONSTANT  family = MONOMIAL  initial_from_file_var = grain_id   []
+  ...
 []
 
 [Materials]
   [elasticity]
-    type = ComputeElasticityTensorCoupled   # from crystal_ort repo
-    euler_angle_1 = euler_phi1
+    type = ComputeElasticityTensorCoupled
+    fill_method = symmetric9
+    C_ijkl = '171800 57500 30200 106700 46900 84200 42100 31100 46600'
+    coupled_euler_angle_1 = euler_phi1
+    coupled_euler_angle_2 = euler_Phi
+    coupled_euler_angle_3 = euler_phi2
+  []
+  [stress]
+    type = ComputeMultipleInelasticStress
+    inelastic_models = 'plasticity'
+  []
+  [plasticity]
+    type = OrthotropicPlasticityStressUpdate
+    euler_angle_1 = euler_phi1   # note: no 'coupled_' prefix here
     euler_angle_2 = euler_Phi
     euler_angle_3 = euler_phi2
-    ...
+    # ... yield strengths, softening, viscosity ...
   []
+
+  # HomogenizedExponentialCZM is a MATERIAL (not InterfaceKernel)
+  # boundary must match the CohesiveZone block above exactly
   [czm_intra]
-    type = HomogenizedExponentialCZMMaterial
-    base_name = 'CZM_IntraGrain'
-    boundary = '...'   # list all intra-grain interface names from interface_map.json
-    # Parameters from Kvashin et al. 2026 (needle-needle, organic matrix)
+    type = HomogenizedExponentialCZM
+    boundary = 'interface_1_2 interface_1_3 ...'
+    normal_strength  = 700.0    # MPa — Kvashin et al. 2026 (needle-needle)
+    shear_strength_s = 400.0
+    shear_strength_t = 400.0
+    delta_0          = 0.1      # um
+    md_contact_area  = 1.0e-4
+    max_contacts     = 10000
+    mu = 0.95  eta = 0.1  damage_viscosity = 2.5
+    strength_std_dev = 0.0  initial_damage_max = 0.0  delta0_std_dev = 0.0
   []
-  [czm_inter]
-    type = HomogenizedExponentialCZMMaterial
-    base_name = 'CZM_InterGrain'
-    boundary = '...'
-    # Parameters for inter-sclerodermite boundary (water/protein layer)
+  [czm_inter]                                        # if inter-grain exists
+    type = HomogenizedExponentialCZM
+    boundary = 'interface_3_7 ...'
+    # weaker parameters for inter-sclerodermite boundary
+    normal_strength = ...
   []
+[]
+
+[BCs]
+  # paste from _moose.i, adjust load case
+[]
+
+[Executioner]
+  type = Transient
+  solve_type = 'NEWTON'
+  petsc_options_iname = '-pc_type -pc_factor_mat_solver_package'
+  petsc_options_value = 'lu       superlu_dist'
+  nl_rel_tol = 1e-6  nl_abs_tol = 1e-8  nl_max_its = 200
+  dt = 0.1
+  end_time = 5.0     # validation; increase for production
+  [TimeStepper]
+    type = IterationAdaptiveDT
+    dt = 0.1  optimal_iterations = 22  growth_factor = 1.5  cutback_factor = 0.5
+  []
+[]
+
+[Outputs]
+  exodus = true  csv = true
 []
 ```
 
