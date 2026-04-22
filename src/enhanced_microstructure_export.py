@@ -52,7 +52,8 @@ def generate_nucleation_centers(num_centers, bounds, min_distance=None, z_constr
 
 def radial_needles_more_2d(num_centers, domain_size, needle_length_range, 
                            needles_per_center_range, resolution=100,
-                           z_constraint_factor=0.2, quasi_2d=True):
+                           z_constraint_factor=0.2, quasi_2d=True,
+                           aspect_ratio_range=(8, 15)):
     """
     Generate 3D volume with radially-oriented needle crystals growing from nucleation centers,
     with adjustments to create more 2D-like flower patterns and separate grain/needle IDs
@@ -146,7 +147,7 @@ def radial_needles_more_2d(num_centers, domain_size, needle_length_range,
             length = np.random.uniform(needle_length_range[0], needle_length_range[1])
             
             # Aspect ratio (length/width)
-            aspect_ratio = np.random.uniform(8, 15)  # Typical for needle-like structures
+            aspect_ratio = np.random.uniform(aspect_ratio_range[0], aspect_ratio_range[1])
             width = length / aspect_ratio
             
             # Needle properties
