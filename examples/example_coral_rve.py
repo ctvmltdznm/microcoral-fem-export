@@ -14,6 +14,8 @@ Then convert for MOOSE:
 
     cd ..
     python src/convert_to_moose.py examples/aragonite.e examples/aragonite_moose.e --verify
+
+Author: nk03
 """
 
 import os
@@ -36,8 +38,11 @@ from assign_orientations import OrientationParams
 # Geometry
 NUM_CENTERS              = 45         # sclerodermites (grains)
 DOMAIN_SIZE              = 10.0       # physical size in µm
-NEEDLE_LENGTH_RANGE      = (1.0, 4.0) # µm
-NEEDLES_PER_CENTER_RANGE = (10, 35)
+NEEDLE_LENGTH_RANGE      = (1.0, 4.0) # µm — typical coral aragonite needles
+NEEDLES_PER_CENTER_RANGE = (10, 35)   # needles per sclerodermite
+ASPECT_RATIO_RANGE       = (10, 20)   # length/width — real coral ~10-20:1
+                                       # increase for thinner needles;
+                                       # needs resolution >= 50 to resolve width
 RESOLUTION               = 100        # voxels per side; 100^3 = 1M elements
 
 # Structure type
@@ -87,6 +92,7 @@ volume, needle_volume, center_properties, _ = radial_needles_more_2d(
     resolution               = RESOLUTION,
     z_constraint_factor      = Z_CONSTRAINT_FACTOR,
     quasi_2d                 = QUASI_2D,
+    aspect_ratio_range       = ASPECT_RATIO_RANGE,
 )
 
 n_grains  = len(center_properties)
