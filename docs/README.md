@@ -46,7 +46,7 @@ microcoral-fem-export/
 ```bash
 git clone https://github.com/ctvmltdznm/microcoral-fem-export.git
 cd microcoral-fem-export
-pip install -r requirements.txt
+pip install -r docs/requirements.txt
 ```
 
 ### Generate a microstructure
@@ -78,15 +78,14 @@ examples/
   aragonite_moose.e                     one block per needle, all element vars preserved
   aragonite_moose_mesh_info.json        mesh bounds + block-to-grain mapping
   aragonite_moose_interface_map.json    every interface typed intra_grain / inter_grain
-  aragonite_moose_moose.i              paste-ready [Mesh], [InterfaceKernels], [BCs]
+  aragonite_moose_moose.i              paste-ready [Mesh], [Materials], [BCs]
   aragonite_moose_mackenzie.png         orientation verification (with --verify)
 ```
 
 ### Verify orientation model (optional, before a production run)
 
 ```bash
-python src/assign_orientations.py \
-    --plot --n-grains 100 --needles-per-grain 120 --sigma-twin 0.5
+python src/assign_orientations.py --plot --n-grains 100 --needles-per-grain 120 --sigma-twin 0.5
 ```
 
 Compare `synthetic_mackenzie.png` against your EBSD Mackenzie plot. Twin peaks
@@ -94,8 +93,8 @@ should appear at 52.4°, 57.2°, 63.8°.
 
 ### Run in MOOSE
 
-Paste `aragonite_moose_moose.i` into your simulation input, then add
-`[GlobalParams]`, `[Modules/TensorMechanics/Master]`, and `[Materials]` with
+Paste `aragonite_moose_moose.i` into your simulation input, then modify
+`[GlobalParams]` and `[Materials]` with
 your CZM parameters. See `docs/PIPELINE.md` for a complete MOOSE input template.
 
 ---
@@ -168,7 +167,7 @@ See `docs/COMPLETE_WORKFLOW.md`.
 ## Dependencies
 
 ```bash
-pip install -r requirements.txt
+pip install -r docs/requirements.txt
 # numpy scipy matplotlib pyvista meshio netCDF4
 ```
 
