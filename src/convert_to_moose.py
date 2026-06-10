@@ -215,24 +215,28 @@ def detect_interfaces(mesh_data: dict, blocks: dict) -> dict:
     # Since we split by unique_ids in sorted order, rebuild elem_to_block directly
     # from the original field (which is still in mesh_data['elem_vars']).
 
-    if 'needle_id' in mesh_data['elem_vars'] and any(
-        k == 'needle_id' for k in blocks):
-        org_field = mesh_data['elem_vars']['needle_id'].astype(int)
-    elif 'grain_id' in mesh_data['elem_vars']:
-        org_field = mesh_data['elem_vars']['grain_id'].astype(int)
-    else:
-        # Fall back to first elem_var
-        org_field = list(mesh_data['elem_vars'].values())[0].astype(int)
-
-    # Determine which field was used to organise
-    # (block IDs = unique values of that field)
+    # Determine which element variable field was used to organise blocks.
+    # blocks.keys() == unique values of the organize_by field, so find
+    # whichever elem_var matches those unique values exactly.
     block_ids_set = set(blocks.keys())
-    # check if org_field values match
-    if set(np.unique(org_field).tolist()) == block_ids_set:
-        elem_to_block = org_field
-    else:
-        # organise_by was grain_id, so use grain_id field
-        elem_to_block = mesh_data['elem_vars']['grain_id'].astype(int)
+    elem_to_block = None
+
+    for field_name, field_data in mesh_data['elem_vars'].items():
+        vals = set(np.unique(field_data.astype(int)).tolist())
+        if vals == block_ids_set:
+            elem_to_block = field_data.astype(int)
+            print(f"  Using '{field_name}' as block-ID field "
+                  f"({len(block_ids_set)} unique values)")
+            break
+
+    if elem_to_block is None:
+        # Fallback: use grain_id if available, otherwise first field
+        fallback = ('grain_id' if 'grain_id' in mesh_data['elem_vars']
+                    else list(mesh_data['elem_vars'].keys())[0])
+        elem_to_block = mesh_data['elem_vars'][fallback].astype(int)
+        print(f"  WARNING: no elem_var matched block IDs exactly. "
+              f"Falling back to '{fallback}'.")
+        print(f"  Interface classification may be incorrect.") 
 
     # Build face → [elem_idx, ...] lookup
     # Each hex has 6 faces; each face represented as sorted tuple of 4 global node IDs
