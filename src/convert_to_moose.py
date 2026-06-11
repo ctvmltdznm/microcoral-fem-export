@@ -368,19 +368,11 @@ def write_exodus(output_file: str, mesh_data: dict, blocks: dict) -> None:
                 name_array = np.array([c.encode('utf-8') for c in name_str], dtype='S1')
                 name_var[i, :] = name_array
 
-        # Set explicit block names to their numeric IDs.
-        # This ensures BreakMeshByBlockGenerator creates sidesets named
-        # 'interface_{A}_{B}' (e.g. 'interface_1_2') rather than the
-        # meshio-generated names like 'Block-1_Block-2'.
-        if 'eb_names' in exo.variables:
-            for blk_idx, bid in enumerate(sorted_bids):
-                name_str   = str(bid).ljust(33, '\x00')
-                name_array = np.array([c.encode('utf-8') for c in name_str], dtype='S1')
-                exo.variables['eb_names'][blk_idx, :] = name_array
-            print(f"  Block names set to numeric IDs: "
-                  f"{sorted_bids[0]}..{sorted_bids[-1]}")
-            print(f"  BreakMeshByBlock will create sidesets: "
-                  f"interface_{sorted_bids[0]}_{sorted_bids[1]}, ...")
+        # Note: we do NOT set eb_names — MOOSE assigns sequential 0-indexed
+        # block names (Block0, Block1, ...) by default.
+        # fill_and_generate_configs.py uses mesh_info.json to map block IDs
+        # to their 0-indexed positions: sorted_bids[0]→Block0, etc.
+        print(f"  Block ordering: {sorted_bids[:3]}... → Block0, Block1, Block2, ...")
 
         for var_idx, var_name in enumerate(var_names):
             for block_idx in range(n_blocks):
@@ -1165,4 +1157,3 @@ def main(argv=None):
 
 if __name__ == '__main__':
     main()
-    
